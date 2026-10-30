@@ -9,6 +9,10 @@ const fb = vi.hoisted(() => ({
   updateDoc: vi.fn(),
   setDoc: vi.fn(),
   getDoc: vi.fn(),
+  batchSet: vi.fn(),
+  batchDelete: vi.fn(),
+  deleteUser: vi.fn(),
+  batchCommit: vi.fn(async () => {}),
 }));
 
 vi.mock('@/lib/firebase', () => ({ auth: fb.auth, db: {} }));
@@ -16,13 +20,17 @@ vi.mock('firebase/auth', () => ({
   signInWithEmailAndPassword: fb.signIn,
   createUserWithEmailAndPassword: fb.create,
   signOut: fb.signOut,
+  deleteUser: fb.deleteUser,
   EmailAuthProvider: {},
   GoogleAuthProvider: class {},
   GithubAuthProvider: class {},
 }));
 vi.mock('firebase/firestore', () => ({
-  doc: vi.fn((_db, ...path) => path.join('/')),
-  collection: vi.fn(),
+  // doc(db, ...path) -> 'a/b'; doc(collectionPath) -> a new id in it
+  doc: vi.fn((base, ...path) => (typeof base === 'string' ? Object.assign(new String(`${base}/new-id`), { id: 'new-id' }) : path.join('/'))),
+  collection: vi.fn((_db, ...path) => path.join('/')),
+  collectionGroup: vi.fn((_db, name) => `group:${name}`),
+  writeBatch: vi.fn(() => ({ set: fb.batchSet, update: vi.fn(), delete: fb.batchDelete, commit: fb.batchCommit })),
   query: vi.fn(),
   where: vi.fn(),
   getDocs: vi.fn(),
@@ -33,7 +41,7 @@ vi.mock('firebase/firestore', () => ({
   serverTimestamp: vi.fn(() => 'SERVER_TIME'),
   getDoc: fb.getDoc,
   arrayUnion: vi.fn((h) => ['union', h]),
-  arrayRemove: vi.fn((h) => ['remove', h]),
+  arrayRemove: vi.fn((...h) => ['remove', ...h]),
   orderBy: vi.fn((...a) => ['orderBy', ...a]),
   startAt: vi.fn((v) => ['startAt', v]),
   endAt: vi.fn((v) => ['endAt', v]),
@@ -41,6 +49,7 @@ vi.mock('firebase/firestore', () => ({
   getCountFromServer: vi.fn(async () => ({ data: () => ({ count: 2 }) })),
   documentId: vi.fn(() => 'docId'),
   limit: vi.fn((n) => ['limit', n]),
+  increment: vi.fn((n) => ['increment', n]),
 }));
 
 import { api, projectFrom } from './api';
@@ -267,6 +276,133 @@ describe('follow (at most 500 authors)', () => {
   it('still accepts an author who is already in a full list', async () => {
     await api.follow('a_7');
     expect(fb.setDoc).toHaveBeenCalledWith('follows/u1', { handles: ['union', 'a_7'] }, { merge: true });
+  });
+});
+
+describe('bookmarks, reports and search', () => {
+  beforeEach(() => {
+    fb.auth.currentUser = { uid: 'u1', emailVerified: true };
+  });
+
+  it('refuses the 201st saved circuit', async () => {
+    fb.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ ids: Array.from({ length: 200 }, (_, i) => `p${i}`) }) });
+    await expect(api.setBookmark('p-new', true)).rejects.toMatchObject({ code: 'limit_reached' });
+    await api.setBookmark('p3', false); // removing always works
+    expect(fb.setDoc).toHaveBeenCalledWith('bookmarks/u1', { ids: ['remove', 'p3'] }, { merge: true });
+  });
+
+  it('lists saved circuits newest save first, keeping samples and dropping ones taken down', async () => {
+    const { getDocs } = await import('firebase/firestore');
+    fb.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ ids: ['p1', 'sample-blink', 'gone'] }) });
+    getDocs.mockResolvedValueOnce({ docs: [{ id: 'p1', data: () => ({ name: 'Mine', approved: true }) }] });
+    getDocs.mockResolvedValue({ docs: [] }); // likes
+    const saved = await api.savedItems();
+    expect(saved.items.map((i) => i.id)).toEqual(['sample-blink', 'p1']);
+    expect(saved.missing).toEqual(['gone']);
+    await api.forgetBookmarks(saved.missing);
+    expect(fb.setDoc).toHaveBeenCalledWith('bookmarks/u1', { ids: ['remove', 'gone'] }, { merge: true });
+  });
+
+  it('reports a circuit once, under an id tied to the reporter', async () => {
+    fb.getDoc.mockResolvedValueOnce({ exists: () => false });
+    await api.reportCircuit('p1', '  Spam  ');
+    expect(fb.batchSet).toHaveBeenCalledWith('reports/p1_u1', { projectId: 'p1', userId: 'u1', reason: 'Spam', createdAt: expect.any(Number) });
+    expect(fb.batchSet).toHaveBeenCalledWith('limits/u1', { comment: 'SERVER_TIME', commentId: 'p1_u1' }, { merge: true });
+    fb.batchCommit.mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+    fb.getDoc.mockResolvedValueOnce({ exists: () => false });
+    await expect(api.reportCircuit('p2', 'Spam')).rejects.toMatchObject({ code: 'throttled' });
+    fb.getDoc.mockResolvedValueOnce({ exists: () => true });
+    await expect(api.reportCircuit('p1', 'Spam')).rejects.toMatchObject({ code: 'conflict' });
+    await expect(api.reportCircuit('sample-blink', 'Spam')).rejects.toThrow(/cannot be reported/);
+    await expect(api.reportCircuit('p1', '  ')).rejects.toMatchObject({ code: 'validation_error' });
+  });
+
+  it('searches names by prefix, lowercased, and adds matching samples', async () => {
+    const { getDocs, startAt } = await import('firebase/firestore');
+    getDocs.mockResolvedValue({ docs: [] });
+    const found = await api.searchGallery('  GARAGE ');
+    expect(startAt).toHaveBeenCalledWith('garage');
+    expect(found.map((i) => i.id)).toEqual(['sample-parking']);
+    expect(await api.searchGallery('')).toEqual([]);
+  });
+
+  it("lowercases only A-Z, like the rules, so a name with accented capitals can still be saved", async () => {
+    await api.save('p1', { name: 'Élan ÀB' }).catch(() => {});
+    expect(fb.updateDoc).toHaveBeenCalledWith('projects/p1', expect.objectContaining({ nameLower: 'Élan Àb' }));
+  });
+
+  it('stores the lowercase name with every save, for the search', async () => {
+    await api.save('p1', { name: 'Big LED' }).catch(() => {});
+    expect(fb.updateDoc).toHaveBeenCalledWith('projects/p1', expect.objectContaining({ name: 'Big LED', nameLower: 'big led' }));
+  });
+});
+
+describe('discussions and notifications', () => {
+  beforeEach(() => {
+    fb.auth.currentUser = { uid: 'u1', emailVerified: true };
+    fb.getDoc.mockImplementation(async (path) => ({
+      exists: () => true,
+      data: () =>
+        ({
+          'users/u1': { name: 'Ada', handle: 'ada_1' },
+          'threads/t1': { userId: 'starter7' },
+          'threads/t1/posts/c1': { userId: 'commenter8', parentId: null },
+        })[path] ?? {},
+    }));
+  });
+
+  const notes = () => fb.setDoc.mock.calls.filter(([path]) => path.includes('/notifications/'));
+
+  it("tells a circuit's owner about a like, but not about liking your own", async () => {
+    const circuit = { ownerId: 'owner9', name: 'Blink', approved: true, likeCount: 0 };
+    fb.runTx.mockImplementation(async (_db, fn) =>
+      fn({
+        get: async (path) => ({ exists: () => path === 'projects/p1', data: () => circuit }),
+        set: vi.fn(),
+        delete: vi.fn(),
+        update: vi.fn(),
+      }),
+    );
+    await api.like('p1');
+    expect(notes()).toEqual([
+      ['users/owner9/notifications/like_p1_u1', expect.objectContaining({ type: 'like', targetId: 'p1', from: 'ada_1', read: false, text: 'Blink' })],
+    ]);
+    fb.setDoc.mockClear();
+    fb.auth.currentUser = { uid: 'owner9', emailVerified: true };
+    await api.like('p1');
+    expect(notes()).toEqual([]);
+  });
+
+  it('a reply notifies the author of the comment it answers; a comment notifies the thread starter', async () => {
+    await api.addPost('t1', 'Same here', 'c1');
+    await api.addPost('t1', 'Welcome!');
+    expect(notes().map(([path]) => path.split('/')[1])).toEqual(['commenter8', 'starter7']);
+    expect(notes()[0][1]).toMatchObject({ type: 'reply', targetId: 't1', ref: 'new-id', from: 'ada_1' });
+    expect(fb.batchSet).toHaveBeenCalledWith('limits/u1', { comment: 'SERVER_TIME', commentId: 'new-id' }, { merge: true });
+  });
+
+  it('explains the one-a-minute limit on new discussions', async () => {
+    fb.batchCommit.mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+    await expect(api.createThread({ title: 'Hello', body: 'World' })).rejects.toMatchObject({ code: 'throttled' });
+    await expect(api.createThread({ title: 'Hi', body: 'x' })).rejects.toMatchObject({ code: 'validation_error' });
+  });
+});
+
+describe('deleteAccount', () => {
+  it('removes notifications page by page, discussions, bookmarks and the profile, then the login', async () => {
+    const { getDocs, query } = await import('firebase/firestore');
+    fb.auth.currentUser = { uid: 'u1', emailVerified: true, metadata: { lastSignInTime: new Date().toUTCString() } };
+    fb.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ handle: 'ada_1' }) });
+    query.mockImplementation((base) => base);
+    const page = (...ids) => ({ docs: ids.map((id) => ({ id, ref: `ref:${id}` })) });
+    const pages = { 'users/u1/notifications': [page('n1', 'n2'), page('n3'), page()], threads: [page('t1'), page()], reports: [page('r1')] };
+    getDocs.mockImplementation(async (q) => (pages[q] ? pages[q].shift() : page()));
+
+    await api.deleteAccount();
+    const deleted = fb.batchDelete.mock.calls.map(([r]) => String(r));
+    expect(deleted).toEqual(expect.arrayContaining(['ref:n1', 'ref:n2', 'ref:n3', 'ref:t1', 'ref:r1', 'bookmarks/u1', 'follows/u1', 'handles/ada_1', 'users/u1']));
+    expect(fb.deleteUser).toHaveBeenCalled();
+    query.mockReset();
   });
 });
 

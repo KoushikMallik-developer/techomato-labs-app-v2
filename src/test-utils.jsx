@@ -9,6 +9,7 @@ import projectsReducer from '@/features/projects/projectsSlice';
 import galleryReducer from '@/features/gallery/gallerySlice';
 import editorReducer from '@/features/editor/editorSlice';
 import adminReducer from '@/features/admin/adminSlice';
+import notificationsReducer from '@/features/notifications/notificationsSlice';
 
 /** Same shape as the real app/store.js, so any selector works against it. */
 export function makeTestStore(preloadedState = {}) {
@@ -21,6 +22,7 @@ export function makeTestStore(preloadedState = {}) {
       gallery: galleryReducer,
       editor: editorReducer,
       admin: adminReducer,
+      notifications: notificationsReducer,
     },
     preloadedState,
   });
@@ -52,6 +54,7 @@ export function galleryState(overrides = {}) {
     detail: null,
     comments: [],
     following: [],
+    bookmarks: [],
     ...overrides,
   };
 }

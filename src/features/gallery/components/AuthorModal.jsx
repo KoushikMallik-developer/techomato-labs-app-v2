@@ -41,6 +41,9 @@ export default function AuthorModal({ handle, close }) {
         {items.length === 0 && <p className="muted small">Nothing shared yet.</p>}
       </div>
       <div className="modal-actions">
+        <Link className="btn" to={`/u/${handle}`} onClick={close}>
+          View profile
+        </Link>
         <button className="btn" onClick={close}>
           Close
         </button>

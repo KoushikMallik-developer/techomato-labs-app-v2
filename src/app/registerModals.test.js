@@ -7,6 +7,7 @@ import { registerGalleryModals } from '@/features/gallery/registerModals';
 vi.mock('@/components/registerCoreModals', () => ({ registerCoreModals: vi.fn() }));
 vi.mock('@/features/projects/registerModals', () => ({ registerProjectsModals: vi.fn() }));
 vi.mock('@/features/gallery/registerModals', () => ({ registerGalleryModals: vi.fn() }));
+vi.mock('@/features/editor/registerModals', () => ({ registerEditorModals: vi.fn() }));
 
 describe('registerAllModals', () => {
   it('registers every feature\'s modals', () => {

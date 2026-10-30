@@ -46,7 +46,7 @@ const initialState = {
   view: '2d', // '2d' | '3d'
   running: false,
   sheetCollapsed: false,
-  activeTab: 'code', // 'code' | 'serial'
+  activeTab: 'code', // 'code' | 'serial' | 'plot'
   status: 'idle', // idle | loading | ready | error
   saveState: 'saved', // saved | saving | dirty
   approved: false, // live in Community Circuits: a save sends it back to review
@@ -94,7 +94,8 @@ const editorSlice = createSlice({
     },
     rotatePart(state, action) {
       const p = state.parts.find((part) => part.id === action.payload);
-      if (p) {
+      // The Arduino and breadboard are the fixed frame everything else is placed on.
+      if (p && p.type !== 'arduino' && p.type !== 'breadboard') {
         p.rot = ((p.rot || 0) + 90) % 360;
         const [x, y] = snapPartPos(p, p.x, p.y);
         p.x = x;

@@ -106,12 +106,24 @@ describe('ProjectsPage', () => {
     await waitFor(() => expect(selectToast(store.getState()).message).toBe('Project imported.'));
   });
 
+  it('imports an Arduino .ino sketch onto a blank breadboard', async () => {
+    api.importProject.mockResolvedValue({ id: 'p-ino', name: 'blink' });
+    const { store, container } = renderWithProviders(<ProjectsPage />);
+    await waitFor(() => expect(api.projects).toHaveBeenCalled());
+    const file = new File(['void setup() {} void loop() {}'], 'blink.ino', { type: '' });
+    fireEvent.change(container.querySelector('input[type=file]'), { target: { files: [file] } });
+    await waitFor(() => expect(selectToast(store.getState()).message).toBe('Project imported.'));
+    const sent = api.importProject.mock.calls[0][0];
+    expect(sent).toMatchObject({ name: 'blink', code: 'void setup() {} void loop() {}' });
+    expect(sent.parts.map((p) => p.type)).toEqual(expect.arrayContaining(['breadboard', 'arduino']));
+  });
+
   it('shows an error toast when the imported file is not valid JSON', async () => {
     const { store, container } = renderWithProviders(<ProjectsPage />);
     await waitFor(() => expect(api.projects).toHaveBeenCalled());
     const file = new File(['not json'], 'circuit.json', { type: 'application/json' });
     const input = container.querySelector('input[type=file]');
     fireEvent.change(input, { target: { files: [file] } });
-    await waitFor(() => expect(selectToast(store.getState()).message).toBe('That file could not be imported.'));
+    await waitFor(() => expect(selectToast(store.getState()).message).toBe('That file is not a Techomato circuit.'));
   });
 });

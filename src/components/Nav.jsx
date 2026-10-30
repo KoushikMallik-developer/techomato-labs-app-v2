@@ -39,6 +39,12 @@ export default function Nav({ active }) {
           <NavLink to="/community" className={active === 'gallery' ? 'on' : ''}>
             Community Circuits
           </NavLink>
+          <NavLink to="/lessons" className={active === 'lessons' ? 'on' : ''}>
+            Lessons
+          </NavLink>
+          <NavLink to="/discussions" className={active === 'discussions' ? 'on' : ''}>
+            Discussions
+          </NavLink>
         </nav>
         <div className="nav-right">
           {user ? (
@@ -59,6 +65,12 @@ export default function Nav({ active }) {
                   </div>
                   <Link to="/projects" onClick={() => setMenuOpen(false)}>
                     Your projects
+                  </Link>
+                  <Link to="/notifications" onClick={() => setMenuOpen(false)}>
+                    Notifications
+                  </Link>
+                  <Link to="/saved" onClick={() => setMenuOpen(false)}>
+                    Saved circuits
                   </Link>
                   <Link to="/settings" onClick={() => setMenuOpen(false)}>
                     Settings

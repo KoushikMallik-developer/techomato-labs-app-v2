@@ -13,6 +13,8 @@ vi.mock('@/lib/api', () => ({
     adminLogout: vi.fn(),
     adminUsers: vi.fn(),
     setUserDisabled: vi.fn(),
+    adminReports: vi.fn(),
+    dismissReport: vi.fn(),
   },
 }));
 
@@ -32,6 +34,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.pendingCircuits.mockResolvedValue([]);
   api.adminUsers.mockResolvedValue({ users: [], cursor: null });
+  api.adminReports.mockResolvedValue([]);
 });
 
 describe('AdminPanelPage', () => {

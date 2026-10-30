@@ -4,6 +4,7 @@ import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders, authState, signedInUser } from '@/test-utils';
 import { api } from '@/lib/api';
 import DetailPage from './DetailPage';
+import { selectModal } from '@/features/ui/uiSlice';
 
 vi.mock('@/lib/api', () => ({
   api: {
@@ -14,6 +15,8 @@ vi.mock('@/lib/api', () => ({
     remix: vi.fn(),
     addComment: vi.fn(),
     deleteComment: vi.fn(),
+    bookmarks: vi.fn(async () => []),
+    setBookmark: vi.fn(),
   },
 }));
 
@@ -135,5 +138,24 @@ describe('DetailPage', () => {
     });
     renderDetail();
     expect(await screen.findByText(/2×/)).toBeInTheDocument();
+  });
+
+  it('saves a circuit for later and opens the report dialog', async () => {
+    api.item.mockResolvedValue(item);
+    api.bookmarks.mockResolvedValue([]);
+    api.setBookmark.mockResolvedValue({ id: 'g-1', saved: true });
+    const { store } = renderDetail({ auth: authState({ user: signedInUser() }) });
+    fireEvent.click(await screen.findByText('Save'));
+    expect(await screen.findByText('Saved')).toBeInTheDocument();
+    expect(api.setBookmark).toHaveBeenCalledWith('g-1', true);
+    fireEvent.click(screen.getByText('Report'));
+    expect(selectModal(store.getState())).toMatchObject({ type: 'report', props: { item: { id: 'g-1' } } });
+  });
+
+  it('sends a signed-out visitor to log in before saving', async () => {
+    api.item.mockResolvedValue(item);
+    renderDetail();
+    fireEvent.click(await screen.findByText('Save'));
+    expect(await screen.findByText('Login page')).toBeInTheDocument();
   });
 });

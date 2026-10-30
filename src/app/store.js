@@ -6,6 +6,7 @@ import projectsReducer from '@/features/projects/projectsSlice';
 import galleryReducer from '@/features/gallery/gallerySlice';
 import editorReducer from '@/features/editor/editorSlice';
 import adminReducer from '@/features/admin/adminSlice';
+import notificationsReducer from '@/features/notifications/notificationsSlice';
 import { failureToast } from './failureToast';
 
 export const store = configureStore({
@@ -17,6 +18,7 @@ export const store = configureStore({
     gallery: galleryReducer,
     editor: editorReducer,
     admin: adminReducer,
+    notifications: notificationsReducer,
   },
   middleware: (getDefault) => getDefault().concat(failureToast),
 });

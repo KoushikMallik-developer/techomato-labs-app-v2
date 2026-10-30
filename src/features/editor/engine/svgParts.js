@@ -275,6 +275,34 @@ ${['E', 'B', 'C'].map((l, i) => `<text x="${-10 + i * 10}" y="-3" text-anchor="m
 <text x="0" y="16" text-anchor="middle" font-size="7.5" fill="#dfe8ff" font-family="Instrument Sans,sans-serif">${Math.round(a)}°</text>`;
     return s;
   },
+  joystick(p) {
+    const kx = (((p.props.x ?? 0.5) - 0.5) * 24).toFixed(1);
+    const ky = (-2 + ((p.props.y ?? 0.5) - 0.5) * 24).toFixed(1);
+    const pressed = sim.running && p.pressed;
+    return `${[-20, -10, 0, 10, 20].map((x) => `<line x1="${x}" y1="24" x2="${x}" y2="34" ${LEG}/>`).join('')}
+<rect x="-28" y="-28" width="56" height="52" rx="5" fill="#1d1f22" stroke="#3a3d42"/>
+<circle cx="0" cy="-2" r="19" fill="#2a2d31" stroke="#4a4e54"/>
+<g data-ctl="joystick"><circle cx="${kx}" cy="${ky}" r="11" fill="${pressed ? '#55595f' : '#3a3d42'}" stroke="#6b7078" stroke-width="2"/><circle cx="${kx}" cy="${ky}" r="5" fill="#6b7078"/></g>`;
+  },
+  dht(p) {
+    const t = Math.round(p.props.temp ?? 24);
+    const h = Math.round(p.props.hum ?? 50);
+    return `${[-10, 0, 10].map((x) => `<line x1="${x}" y1="12" x2="${x}" y2="26" ${LEG}/>`).join('')}
+<g data-ctl="dht"><rect x="-17" y="-28" width="34" height="40" rx="3" fill="#3aa0d8" stroke="#22709e"/>
+${[-21, -14, -7, 0].map((y) => `<rect x="-11" y="${y}" width="22" height="3" rx="1.5" fill="#22709e"/>`).join('')}</g>
+<text x="0" y="41" text-anchor="middle" font-size="8.5" font-family="Instrument Sans,sans-serif" style="fill:var(--canvas-ink)">${t}°C · ${h}%</text>`;
+  },
+  neopixel(p) {
+    const colors = sim.running ? sim.neoColors[p.id] || [] : [];
+    const hex = (c) => '#' + (c & 0xffffff).toString(16).padStart(6, '0');
+    return `${[-10, 0, 10].map((x) => `<line x1="${x}" y1="12" x2="${x}" y2="22" ${LEG}/>`).join('')}
+<rect x="-58" y="-12" width="116" height="24" rx="4" fill="#111" stroke="#333"/>
+${Array.from({ length: 8 }, (_, i) => {
+  const c = Number(colors[i]) || 0;
+  const x = -53 + i * 14;
+  return `<rect x="${x}" y="-5" width="10" height="10" rx="2" fill="${c ? hex(c) : '#2b2b2b'}" stroke="#555"/>${c ? `<circle cx="${x + 5}" cy="0" r="9" fill="${hex(c)}" opacity=".35"/>` : ''}`;
+}).join('')}`;
+  },
   sevenseg(p) {
     const on = sim.running ? sim.segOn[p.id] || {} : {};
     const R = '#ff3b30';

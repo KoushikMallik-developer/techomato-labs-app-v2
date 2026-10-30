@@ -12,6 +12,17 @@ service cloud.firestore {
     // A disabled account (an admin-made disabledUsers/{uid} document) can read but not write anything.
     function active() { return !exists(/databases/$(database)/documents/disabledUsers/$(request.auth.uid)); }
     function changed(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+    function handleOf(uid) { return get(/databases/$(database)/documents/users/$(uid)).data.handle; }
+    function recent(t) { return t is number && t <= request.time.toMillis() + 600000; }
+    // A like on a discussion post or comment is the liker's own uid added to, or removed from, likedBy.
+    function likeToggle() {
+      let before = resource.data.likedBy.toSet();
+      let after = request.resource.data.likedBy.toSet();
+      let me = [request.auth.uid].toSet();
+      return signedIn() && active() && changed(['likedBy'])
+        && request.resource.data.likedBy.size() == after.size() && after.size() <= 1000
+        && (after == before.union(me) || after == before.difference(me));
+    }
 
     match /admins/{uid} {
       allow get: if isOwner(uid);
@@ -61,7 +72,9 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/projects/$(request.resource.data.removedId)).data.ownerId == uid;
       }
       allow create, update: if isOwner(uid) && active()
-        && request.resource.data.keys().hasOnly(['comment', 'commentId', 'project', 'projectId', 'projectCount', 'removedId'])
+        && request.resource.data.keys().hasOnly(['comment', 'commentId', 'project', 'projectId', 'projectCount', 'removedId', 'thread', 'threadId'])
+        && (!touched().hasAny(['thread', 'threadId']) || (stamp('thread', 60) && request.resource.data.threadId is string
+          && request.auth.token.email_verified == true))
         && (!touched().hasAny(['comment', 'commentId']) || (stamp('comment', 10) && request.resource.data.commentId is string
           && request.auth.token.email_verified == true))
         && (!touched().hasAny(['project', 'projectId']) || (stamp('project', 30) && request.resource.data.projectId is string && adds()))
@@ -93,6 +106,39 @@ service cloud.firestore {
         && request.resource.data.avatar is string && request.resource.data.avatar.size() <= 32;
       allow delete: if isOwner(uid);
 
+      // users/{uid}/notifications/{id}: written by the person who acted, read and cleared by the recipient.
+      // The id names the cause (one like, comment or reply), and the cause must exist and be the sender's,
+      // so nobody can invent notifications or send the same one twice.
+      match /notifications/{nid} {
+        function n() { return request.resource.data; }
+        function project() { return get(/databases/$(database)/documents/projects/$(n().targetId)).data; }
+        function post() { return get(/databases/$(database)/documents/threads/$(n().targetId)/posts/$(n().ref)).data; }
+        // The text is only ever the circuit's name (likes) or empty, so nobody can put their own words in an inbox.
+        function causeOk() {
+          return (n().type == 'like' && nid == 'like_' + n().targetId + '_' + request.auth.uid
+                && project().ownerId == uid && n().text == project().name
+                && exists(/databases/$(database)/documents/users/$(request.auth.uid)/likes/$(n().targetId)))
+            || (n().type == 'comment' && nid == 'comment_' + n().ref && project().ownerId == uid && n().text == ''
+                && get(/databases/$(database)/documents/projects/$(n().targetId)/comments/$(n().ref)).data.userId == request.auth.uid)
+            || (n().type == 'reply' && nid == 'reply_' + n().ref && n().text == '' && post().userId == request.auth.uid
+                && ((post().parentId == null
+                      && get(/databases/$(database)/documents/threads/$(n().targetId)).data.userId == uid)
+                  || (post().parentId != null
+                      && get(/databases/$(database)/documents/threads/$(n().targetId)/posts/$(post().parentId)).data.userId == uid)));
+        }
+        allow get: if isOwner(uid);
+        allow list: if isOwner(uid) && request.query.limit <= 50;
+        allow create: if signedIn() && active() && uid != request.auth.uid
+          && n().keys().hasOnly(['type', 'from', 'targetId', 'ref', 'text', 'read', 'createdAt'])
+          && n().from == handleOf(request.auth.uid)
+          && n().targetId is string && n().ref is string
+          && n().text is string && n().text.size() <= 140
+          && n().read == false && recent(n().createdAt)
+          && causeOk();
+        allow update: if isOwner(uid) && changed(['read']) && request.resource.data.read == true;
+        allow delete: if isOwner(uid);
+      }
+
       // users/{uid}/likes/{projectId}: may only change together with the project's likeCount (see projects rule).
       match /likes/{projectId} {
         allow read: if isOwner(uid);
@@ -111,6 +157,36 @@ service cloud.firestore {
       allow get, delete: if isOwner(uid);
       allow create, update: if isOwner(uid) && active() && request.resource.data.keys().hasOnly(['handles'])
         && request.resource.data.handles is list && request.resource.data.handles.size() <= 500;
+    }
+
+    // bookmarks/{uid} -> { ids: [...] }: circuits the user saved, at most 200 (one read for the whole list).
+    match /bookmarks/{uid} {
+      allow get, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid) && active() && request.resource.data.keys().hasOnly(['ids'])
+        && request.resource.data.ids is list && request.resource.data.ids.size() <= 200;
+    }
+
+    // reports/{projectId}_{uid}: a user flags a shared circuit for the admins, once per circuit (no updates).
+    match /reports/{id} {
+      allow get: if isOwner(resource.data.userId) || isAdmin();
+      // Admins read the queue; a user can find (and, below, delete) only their own reports, for account deletion.
+      allow list: if (isAdmin() || (signedIn() && resource.data.userId == request.auth.uid)) && request.query.limit <= 100;
+      allow create: if signedIn() && active() && request.auth.token.email_verified == true
+        && id == request.resource.data.projectId + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['projectId', 'userId', 'reason', 'createdAt'])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() >= 1 && request.resource.data.reason.size() <= 500
+        && request.resource.data.createdAt is number
+        && request.resource.data.createdAt <= request.time.toMillis() + 600000
+        // A shared circuit, or a discussion (projectId `thread:<id>`).
+        && (request.resource.data.projectId.matches('^thread:[A-Za-z0-9]+$')
+              ? exists(/databases/$(database)/documents/threads/$(request.resource.data.projectId.split(':')[1]))
+              : get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.approved == true)
+        // Same 10 s cooldown as comments, so one account cannot flood the admins' queue.
+        && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.comment == request.time
+        && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.commentId == id;
+      allow delete: if isAdmin() || isOwner(resource.data.userId);
     }
 
     // A user's folders can only have the ids `<uid>_1`, `_2`, `_3`, which caps them at three.
@@ -133,6 +209,8 @@ service cloud.firestore {
           && d.parts is string && d.parts.size() <= 400000
           && d.wires is string && d.wires.size() <= 400000
           && d.code is string && d.code.size() <= 200000
+          // The Community search matches nameLower, so it must really be the name (older circuits have none).
+          && (!d.keys().hasAny(['nameLower']) || d.nameLower == d.name.lower())
           // Sharing needs a verified email (the starter circuit made at signup is not shared, so it passes).
           && (d.published != true || request.auth.token.email_verified == true)
           // The gallery pages by publishedAt, so it must be a real number that is not in the future.
@@ -202,8 +280,48 @@ service cloud.firestore {
       }
     }
 
-    // Lets a signed-in user find their own comments across all circuits (account deletion).
+    // threads/{id}: Discussions. Everyone reads; a verified, active user starts one a minute at most.
+    match /threads/{id} {
+      function t() { return request.resource.data; }
+      allow get: if true;
+      allow list: if request.query.limit <= 50;
+      allow create: if signedIn() && active() && request.auth.token.email_verified == true
+        && t().keys().hasOnly(['userId', 'author', 'title', 'body', 'likedBy', 'createdAt'])
+        && t().userId == request.auth.uid && t().author == handleOf(request.auth.uid)
+        && t().title is string && t().title.size() >= 3 && t().title.size() <= 140
+        && t().body is string && t().body.size() >= 1 && t().body.size() <= 5000
+        && t().likedBy == [] && recent(t().createdAt)
+        && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.thread == request.time
+        && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.threadId == id;
+      allow update: if likeToggle();
+      allow delete: if isOwner(resource.data.userId) || isAdmin();
+
+      // threads/{id}/posts/{postId}: comments (parentId null) and replies to a comment (one level deep).
+      // They share the circuit comments' cooldown stamp.
+      match /posts/{postId} {
+        function p() { return request.resource.data; }
+        function threadExists() { return exists(/databases/$(database)/documents/threads/$(id)); }
+        allow get: if threadExists();
+        allow list: if threadExists() && request.query.limit <= 100;
+        allow create: if signedIn() && active() && threadExists()
+          && p().keys().hasOnly(['userId', 'author', 'text', 'parentId', 'likedBy', 'createdAt'])
+          && p().userId == request.auth.uid && p().author == handleOf(request.auth.uid)
+          && p().text is string && p().text.size() >= 1 && p().text.size() <= 2000
+          && p().likedBy == [] && recent(p().createdAt)
+          && (p().parentId == null || (p().parentId is string
+                && get(/databases/$(database)/documents/threads/$(id)/posts/$(p().parentId)).data.parentId == null))
+          && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.comment == request.time
+          && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.commentId == postId;
+        allow update: if likeToggle();
+        allow delete: if isOwner(resource.data.userId) || isAdmin();
+      }
+    }
+
+    // Lets a signed-in user find their own comments across all circuits and discussions (account deletion).
     match /{path=**}/comments/{commentId} {
+      allow list: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+    match /{path=**}/posts/{postId} {
       allow list: if signedIn() && resource.data.userId == request.auth.uid;
     }
   }

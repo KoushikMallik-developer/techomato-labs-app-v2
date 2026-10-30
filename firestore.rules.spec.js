@@ -45,6 +45,165 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('firestore.rules', () => {
     await assertFails(updateDoc(doc(alice, 'projects', 'p1'), { code: 'swapped()', approved: false, updatedAt: 1 }));
   });
 
+  it('keeps nameLower equal to the lowercase name', async () => {
+    await assertFails(updateDoc(doc(alice, 'projects', 'p1'), { name: 'Blink', nameLower: 'hidden ad', approved: false, updatedAt: serverTimestamp() }));
+    await assertSucceeds(updateDoc(doc(alice, 'projects', 'p1'), { name: 'Big Blink', nameLower: 'big blink', approved: false, updatedAt: serverTimestamp() }));
+  });
+
+  it('accepts a name with accented capitals when nameLower lowercases only A-Z (as the app sends it)', async () => {
+    await assertSucceeds(updateDoc(doc(alice, 'projects', 'p1'), { name: 'Élan ÀB', nameLower: 'Élan Àb', approved: false, updatedAt: serverTimestamp() }));
+  });
+
+  it('caps bookmarks at 200 and keeps them private', async () => {
+    const ids = (n) => Array.from({ length: n }, (_, i) => `p${i}`);
+    await assertFails(setDoc(doc(alice, 'bookmarks', 'alicexyz1234'), { ids: ids(201) }));
+    await assertSucceeds(setDoc(doc(alice, 'bookmarks', 'alicexyz1234'), { ids: ids(200) }));
+    const bob = env.authenticatedContext('bobxyz9999').firestore();
+    await assertFails(getDoc(doc(bob, 'bookmarks', 'alicexyz1234')));
+    await assertFails(setDoc(doc(bob, 'bookmarks', 'alicexyz1234'), { ids: [] }));
+  });
+
+  it('takes one report per verified user per shared circuit, readable by admins only', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'projects', 'pr'), project);
+      await setDoc(doc(ctx.firestore(), 'projects', 'pr-private'), { ...project, approved: false, published: false });
+      await setDoc(doc(ctx.firestore(), 'admins', 'adminxyz0000'), { role: 'admin' });
+    });
+    const bob = env.authenticatedContext('bobxyz9999', { email_verified: true }).firestore();
+    const unverified = env.authenticatedContext('evexyz8888').firestore();
+    const report = (uid, projectId = 'pr') => ({ projectId, userId: uid, reason: 'Spam', createdAt: Date.now() });
+    // A report is sent with its cooldown stamp, as the app does.
+    const send = (db, uid, id, data, stampId = id) => {
+      const b = writeBatch(db);
+      b.set(doc(db, 'reports', id), data);
+      b.set(doc(db, 'limits', uid), { comment: serverTimestamp(), commentId: stampId }, { merge: true });
+      return b.commit();
+    };
+
+    await assertFails(send(unverified, 'evexyz8888', 'pr_evexyz8888', report('evexyz8888')));
+    await assertFails(send(bob, 'bobxyz9999', 'pr_someoneelse', report('bobxyz9999'))); // id must be his
+    await assertFails(send(bob, 'bobxyz9999', 'pr-private_bobxyz9999', report('bobxyz9999', 'pr-private')));
+    await assertFails(setDoc(doc(bob, 'reports', 'pr_bobxyz9999'), report('bobxyz9999'))); // no cooldown stamp
+    await assertSucceeds(send(bob, 'bobxyz9999', 'pr_bobxyz9999', report('bobxyz9999')));
+    await assertFails(send(bob, 'bobxyz9999', 'pr2_bobxyz9999', report('bobxyz9999', 'pr'))); // second report within 10 s
+    await assertFails(send(bob, 'bobxyz9999', 'pr_bobxyz9999', report('bobxyz9999'))); // once only
+    // a discussion can be reported too, once the cooldown has passed; one that does not exist cannot
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'threads', 'td1'), { userId: 'alicexyz1234', author: 'alice_1234', title: 'Hi', body: 'x', likedBy: [], createdAt: 1 });
+      await setDoc(doc(ctx.firestore(), 'limits', 'bobxyz9999'), { comment: new Date(0), commentId: 'old' });
+    });
+    await assertFails(send(bob, 'bobxyz9999', 'thread:nope_bobxyz9999', report('bobxyz9999', 'thread:nope')));
+    await assertSucceeds(send(bob, 'bobxyz9999', 'thread:td1_bobxyz9999', report('bobxyz9999', 'thread:td1')));
+    await assertFails(getDocs(query(collection(bob, 'reports'), limit(10)))); // not only his own
+    await assertSucceeds(getDocs(query(collection(bob, 'reports'), where('userId', '==', 'bobxyz9999'), limit(10))));
+    await assertFails(getDocs(query(collection(bob, 'reports'), where('userId', '==', 'alicexyz1234'), limit(10))));
+
+    const admin = env.authenticatedContext('adminxyz0000').firestore();
+    await assertSucceeds(getDocs(query(collection(admin, 'reports'), orderBy('createdAt', 'desc'), limit(50))));
+    await assertFails(deleteDoc(doc(unverified, 'reports', 'pr_bobxyz9999')));
+    await assertSucceeds(deleteDoc(doc(bob, 'reports', 'pr_bobxyz9999'))); // his own, e.g. when his account is deleted
+  });
+
+  it('lets a verified user start a discussion once a minute, and others like it only with their own uid', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users', 'hanxyz2222'), { name: 'Han', handle: 'han_2222', avatar: '' });
+      await setDoc(doc(ctx.firestore(), 'users', 'ivyxyz3333'), { name: 'Ivy', handle: 'ivy_3333', avatar: '' });
+    });
+    const han = env.authenticatedContext('hanxyz2222', { email_verified: true }).firestore();
+    const ivy = env.authenticatedContext('ivyxyz3333', { email_verified: true }).firestore();
+    const unverified = env.authenticatedContext('hanxyz2222').firestore();
+    const thread = { userId: 'hanxyz2222', author: 'han_2222', title: 'Help with my LCD', body: 'It shows blocks.', likedBy: [], createdAt: Date.now() };
+    const start = (db, id, data = thread) => {
+      const b = writeBatch(db);
+      b.set(doc(db, 'threads', id), data);
+      b.set(doc(db, 'limits', 'hanxyz2222'), { thread: serverTimestamp(), threadId: id }, { merge: true });
+      return b.commit();
+    };
+
+    await assertFails(start(unverified, 't0'));
+    await assertFails(setDoc(doc(han, 'threads', 't0'), thread)); // no stamp
+    await assertFails(start(han, 't0', { ...thread, author: 'someone_else' }));
+    await assertFails(start(han, 't0', { ...thread, likedBy: ['ivyxyz3333'] }));
+    await assertSucceeds(start(han, 't1'));
+    await assertFails(start(han, 't2')); // within the minute
+
+    const anon = env.unauthenticatedContext().firestore();
+    await assertSucceeds(getDoc(doc(anon, 'threads', 't1')));
+    await assertSucceeds(getDocs(query(collection(anon, 'threads'), orderBy('createdAt', 'desc'), limit(15))));
+    await assertFails(getDocs(collection(anon, 'threads'))); // limit required
+
+    const t1 = doc(ivy, 'threads', 't1');
+    await assertSucceeds(updateDoc(t1, { likedBy: ['ivyxyz3333'] }));
+    await assertFails(updateDoc(t1, { likedBy: ['ivyxyz3333', 'hanxyz2222'] })); // someone else's like
+    await assertFails(updateDoc(t1, { likedBy: ['ivyxyz3333', 'ivyxyz3333'] })); // counted twice
+    await assertFails(updateDoc(t1, { title: 'Hijacked' }));
+    await assertSucceeds(updateDoc(t1, { likedBy: [] }));
+    await assertFails(deleteDoc(t1)); // not hers
+    await assertSucceeds(deleteDoc(doc(han, 'threads', 't1')));
+  });
+
+  it('takes comments and one level of replies on a discussion, with the comment cooldown', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users', 'jayxyz4545'), { name: 'Jay', handle: 'jay_4545', avatar: '' });
+      await setDoc(doc(ctx.firestore(), 'threads', 'tp'), { userId: 'alicexyz1234', author: 'alice_1234', title: 'Hi', body: 'x', likedBy: [], createdAt: 1 });
+      await setDoc(doc(ctx.firestore(), 'threads', 'tp', 'posts', 'reply1'), { userId: 'alicexyz1234', author: 'alice_1234', text: 'r', parentId: 'c0', likedBy: [], createdAt: 1 });
+      await setDoc(doc(ctx.firestore(), 'threads', 'tp', 'posts', 'c0'), { userId: 'alicexyz1234', author: 'alice_1234', text: 'c', parentId: null, likedBy: [], createdAt: 1 });
+    });
+    const jay = env.authenticatedContext('jayxyz4545', { email_verified: true }).firestore();
+    const post = (id, parentId) => {
+      const b = writeBatch(jay);
+      b.set(doc(jay, 'threads', 'tp', 'posts', id), { userId: 'jayxyz4545', author: 'jay_4545', text: 'Nice', parentId, likedBy: [], createdAt: Date.now() });
+      b.set(doc(jay, 'limits', 'jayxyz4545'), { comment: serverTimestamp(), commentId: id }, { merge: true });
+      return b.commit();
+    };
+    await assertFails(post('x1', 'reply1')); // a reply to a reply
+    await assertSucceeds(post('x2', 'c0')); // a reply to a comment
+    await assertFails(post('x3', null)); // cooldown
+    await assertFails(deleteDoc(doc(jay, 'threads', 'tp', 'posts', 'c0')));
+    await assertSucceeds(deleteDoc(doc(jay, 'threads', 'tp', 'posts', 'x2')));
+  });
+
+  it('accepts only notifications that match a real action of the sender, once each', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const f = ctx.firestore();
+      await setDoc(doc(f, 'users', 'kimxyz5656'), { name: 'Kim', handle: 'kim_5656', avatar: '' });
+      await setDoc(doc(f, 'projects', 'pn'), project); // owned by alice
+      await setDoc(doc(f, 'users', 'kimxyz5656', 'likes', 'pn'), { createdAt: 1 });
+      await setDoc(doc(f, 'projects', 'pn', 'comments', 'cm1'), { userId: 'kimxyz5656', name: 'Kim', text: 'hi', createdAt: 1 });
+      await setDoc(doc(f, 'projects', 'pn', 'comments', 'cm2'), { userId: 'alicexyz1234', name: 'Alice', text: 'hi', createdAt: 1 });
+      await setDoc(doc(f, 'threads', 'tn'), { userId: 'alicexyz1234', author: 'alice_1234', title: 'Hi', body: 'x', likedBy: [], createdAt: 1 });
+      await setDoc(doc(f, 'threads', 'tn', 'posts', 'pk'), { userId: 'kimxyz5656', author: 'kim_5656', text: 'yo', parentId: null, likedBy: [], createdAt: 1 });
+    });
+    const kim = env.authenticatedContext('kimxyz5656').firestore();
+    const note = (to, id, data) =>
+      setDoc(doc(kim, 'users', to, 'notifications', id), { from: 'kim_5656', text: '', read: false, createdAt: Date.now(), ref: '', ...data });
+
+    await assertFails(note('alicexyz1234', 'like_pn_kimxyz5656', { type: 'like', targetId: 'pn', text: 'Your account is at risk, click here' }));
+    await assertFails(note('alicexyz1234', 'comment_cm1', { type: 'comment', targetId: 'pn', ref: 'cm1', text: 'my own words' }));
+    await assertSucceeds(note('alicexyz1234', 'like_pn_kimxyz5656', { type: 'like', targetId: 'pn', text: 'Blink' }));
+    await assertFails(note('alicexyz1234', 'like_pn_kimxyz5656', { type: 'like', targetId: 'pn', text: 'Blink' })); // once only
+    await assertFails(note('carolxyz9012', 'like_pn_kimxyz5656', { type: 'like', targetId: 'pn', text: 'Blink' })); // not the owner
+    await assertFails(note('alicexyz1234', 'like_p1_kimxyz5656', { type: 'like', targetId: 'p1', text: 'Blink' })); // never liked p1
+    await assertFails(note('alicexyz1234', 'comment_cm3', { type: 'like', targetId: 'pn', text: 'Blink', from: 'alice_1234' })); // forged sender
+
+    await assertSucceeds(note('alicexyz1234', 'comment_cm1', { type: 'comment', targetId: 'pn', ref: 'cm1' }));
+    await assertFails(note('alicexyz1234', 'comment_cm2', { type: 'comment', targetId: 'pn', ref: 'cm2' })); // not her comment
+    await assertSucceeds(note('alicexyz1234', 'reply_pk', { type: 'reply', targetId: 'tn', ref: 'pk' }));
+
+    const aliceNotes = collection(alice, 'users', 'alicexyz1234', 'notifications');
+    await assertSucceeds(getDocs(query(aliceNotes, orderBy('createdAt', 'desc'), limit(30))));
+    await assertSucceeds(updateDoc(doc(aliceNotes, 'reply_pk'), { read: true }));
+    await assertFails(updateDoc(doc(aliceNotes, 'comment_cm1'), { text: 'edited' }));
+    await assertFails(getDocs(query(collection(kim, 'users', 'alicexyz1234', 'notifications'), limit(30))));
+  });
+
+  it('lets a user find their own discussion posts across threads, and nobody else\'s', async () => {
+    const { collectionGroup } = await import('firebase/firestore');
+    const kim = env.authenticatedContext('kimxyz5656').firestore();
+    await assertSucceeds(getDocs(query(collectionGroup(kim, 'posts'), where('userId', '==', 'kimxyz5656'))));
+    await assertFails(getDocs(query(collectionGroup(kim, 'posts'), where('userId', '==', 'alicexyz1234'))));
+  });
+
   it('refuses project lists without a limit', async () => {
     const anon = env.unauthenticatedContext().firestore();
     const approved = query(collection(anon, 'projects'), where('approved', '==', true));

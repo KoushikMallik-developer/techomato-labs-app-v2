@@ -13,6 +13,9 @@ import { TYPES, LED_COLORS, RGB_CH, BB_RAILS } from './constants';
 import { clamp, ck, ard, pinPos } from './geometry';
 import { sim } from './engineStore';
 
+// Modules with their own VCC/GND that draw a small current and only work when powered.
+const POWERED = new Set(['lcd', 'sonar', 'pir', 'dht', 'neopixel']);
+
 function gauss(M, b, n) {
   for (let c = 0; c < n; c++) {
     let p = c;
@@ -154,9 +157,17 @@ function solveOnce(doc, finalPass, log) {
       const pos = p.props.pos ?? 0.5;
       G.push([k('A'), k('W'), 1 / ((1 - pos) * 10000 + 1)]);
       G.push([k('W'), k('B'), 1 / (pos * 10000 + 1)]);
+    } else if (p.type === 'joystick') {
+      // Two potentiometers between VCC and GND (X, Y) and a button that pulls SW to GND.
+      for (const [axis, pin] of [['x', 'VRX'], ['y', 'VRY']]) {
+        const pos = p.props[axis] ?? 0.5;
+        G.push([k('VCC'), k(pin), 1 / ((1 - pos) * 10000 + 1)]);
+        G.push([k(pin), k('GND'), 1 / (pos * 10000 + 1)]);
+      }
+      if (p.pressed) G.push([k('SW'), k('GND'), 100]);
     } else if (p.type === 'buzzer') {
       G.push([k('P'), k('N'), 1 / 400]);
-    } else if (p.type === 'lcd' || p.type === 'sonar' || p.type === 'pir') {
+    } else if (POWERED.has(p.type)) {
       G.push([k('VCC'), k('GND'), 1 / 1000]);
       if (p.type === 'pir') src(p.id + '.OUT', p.triggered ? 5 : 0, 200);
     } else if (p.type === 'led' && !sim.burned[p.id]) {
@@ -277,13 +288,21 @@ function solveOnce(doc, finalPass, log) {
 
   for (const p of P) {
     const k = (pin) => node(p.id + '.' + pin);
-    if (p.type === 'lcd' || p.type === 'sonar' || p.type === 'pir') {
+    if (POWERED.has(p.type)) {
       const powered = nv(k('VCC')) - nv(k('GND')) > 4;
       if (p.type === 'lcd') {
         sim.lcdOn[p.id] = powered;
         sim.lcdI2C[p.id] = powered && node(p.id + '.SDA') === node(AK('A4')) && node(p.id + '.SCL') === node(AK('A5'));
       } else if (p.type === 'sonar') {
         sim.sonarOn[p.id] = powered;
+      } else if (p.type === 'dht') {
+        sim.dhtOn[p.id] = powered;
+      } else if (p.type === 'neopixel') {
+        let colors = [];
+        for (let i = 0; i < 20; i++) {
+          if (powered && sim.neoByPin[i] && node(pinKeyOf(doc, i)) === k('DIN')) colors = sim.neoByPin[i];
+        }
+        sim.neoColors[p.id] = colors;
       }
     } else if (p.type === 'motor') {
       sim.motorSpeed[p.id] = clamp(Math.abs(nv(k('+')) - nv(k('-'))) / 5, 0, 1);

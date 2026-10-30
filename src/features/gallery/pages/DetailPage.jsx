@@ -1,14 +1,22 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import Nav from '@/components/Nav';
 import CircuitThumbnail from '@/components/CircuitThumbnail';
 import CommentList from '../components/CommentList';
 import CommentForm from '../components/CommentForm';
-import { fetchDetail, toggleLike, remixItem, selectGalleryState } from '../gallerySlice';
+import {
+  fetchDetail,
+  toggleLike,
+  remixItem,
+  fetchBookmarks,
+  toggleBookmark,
+  selectGalleryState,
+} from '../gallerySlice';
 import { openModal } from '@/features/ui/uiSlice';
 import { selectIsSignedIn, selectUser } from '@/features/auth/authSlice';
 import { TYPES } from '@/features/editor/engine/constants';
+import { downloadSvgAsPng } from '@/lib/shareImage';
 
 function HeartIcon() {
   return (
@@ -24,11 +32,16 @@ export default function DetailPage() {
   const navigate = useNavigate();
   const isSignedIn = useSelector(selectIsSignedIn);
   const user = useSelector(selectUser);
-  const { detail: item, comments } = useSelector(selectGalleryState);
+  const { detail: item, comments, bookmarks } = useSelector(selectGalleryState);
+  const previewRef = useRef(null);
 
   useEffect(() => {
     dispatch(fetchDetail(id));
   }, [dispatch, id]);
+
+  useEffect(() => {
+    if (isSignedIn) dispatch(fetchBookmarks());
+  }, [dispatch, isSignedIn]);
 
   if (!item) {
     return (
@@ -59,6 +72,24 @@ export default function DetailPage() {
     if (remixItem.fulfilled.match(res)) navigate(`/editor/${res.payload.id}`);
   }
 
+  const signInFirst = () => navigate(`/login?next=${encodeURIComponent(`/community/${id}`)}`);
+  const saved = bookmarks.includes(item.id);
+
+  function onSave() {
+    if (!isSignedIn) return signInFirst();
+    dispatch(toggleBookmark(item.id));
+  }
+
+  function onReport() {
+    if (!isSignedIn) return signInFirst();
+    dispatch(openModal({ type: 'report', props: { item } }));
+  }
+
+  async function onDownloadImage() {
+    const svg = previewRef.current?.querySelector('svg');
+    if (svg) await downloadSvgAsPng(svg, item.name).catch(() => {});
+  }
+
   async function onCopyLink() {
     const url = `${window.location.origin}/community/${item.id}`;
     try {
@@ -77,7 +108,7 @@ export default function DetailPage() {
         </Link>
         <div className="detail">
           <div className="preview glass">
-            <div className="thumb">
+            <div className="thumb" ref={previewRef}>
               <CircuitThumbnail parts={item.parts} wires={item.wires} />
             </div>
           </div>
@@ -115,6 +146,17 @@ export default function DetailPage() {
               <button className="btn" onClick={onCopyLink}>
                 Copy link
               </button>
+              <button className={`btn${saved ? ' on' : ''}`} onClick={onSave} aria-pressed={saved}>
+                {saved ? 'Saved' : 'Save'}
+              </button>
+              <button className="btn" onClick={onDownloadImage}>
+                Download image
+              </button>
+              {!isOwner && (
+                <button className="btn" onClick={onReport}>
+                  Report
+                </button>
+              )}
             </div>
             {item.description && <p className="desc">{item.description}</p>}
             <ul className="facts">

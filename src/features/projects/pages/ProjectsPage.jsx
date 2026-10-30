@@ -60,10 +60,10 @@ export default function ProjectsPage() {
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        await dispatch(importProject(reader.result)).unwrap();
+        await dispatch(importProject({ text: reader.result, fileName: file.name })).unwrap();
         dispatch(showToast('Project imported.'));
-      } catch {
-        dispatch(showToast('That file could not be imported.'));
+      } catch (err) {
+        dispatch(showToast(err.message || 'That file could not be imported.'));
       }
     };
     reader.readAsText(file);
@@ -83,7 +83,7 @@ export default function ProjectsPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="application/json"
+              accept="application/json,.json,.ino"
               hidden
               onChange={onImportFile}
             />

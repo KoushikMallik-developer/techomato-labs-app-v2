@@ -40,6 +40,9 @@ export function createSim() {
     transOn: {},
     motorSpeed: {},
     segOn: {},
+    dhtOn: {}, // partId -> powered
+    neoByPin: {}, // Arduino pin -> the colours last sent with strip.show()
+    neoColors: {}, // partId -> the colours its DIN pin receives
     servoA: {},
     servoPin: {},
   };

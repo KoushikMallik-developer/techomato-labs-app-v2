@@ -1038,6 +1038,50 @@ export function createBoard3D(container, callbacks) {
         knobGroup.rotation.y = (-(a - 90) * Math.PI) / 180;
       });
     },
+    joystick(g, p) {
+      for (const x of [-20, -10, 0, 10, 20]) leg(g, x, 34, x, 24, 4);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(56, 8, 52), standard(0x1d1f22));
+      base.position.set(0, 4, -2);
+      const stick = new THREE.Group();
+      stick.position.set(0, 8, -2);
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 16, 12), standard(0x9aa1aa));
+      shaft.position.y = 8;
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(9, 16, 12), standard(0x2a2d31));
+      cap.position.y = 18;
+      stick.add(shaft, cap);
+      g.add(base, stick);
+      dyn.push(() => {
+        stick.rotation.z = -((p.props.x ?? 0.5) - 0.5) * 0.8;
+        stick.rotation.x = ((p.props.y ?? 0.5) - 0.5) * 0.8;
+      });
+    },
+    dht(g) {
+      for (const x of [-10, 0, 10]) leg(g, x, 26, x, 12, 4);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(34, 30, 10), standard(0x3aa0d8));
+      body.position.set(0, 17, 8);
+      g.add(body);
+    },
+    neopixel(g, p) {
+      for (const x of [-10, 0, 10]) leg(g, x, 22, x, 12, 4);
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(116, 3, 24), standard(0x111111));
+      strip.position.set(0, 3, 0);
+      g.add(strip);
+      const mats = Array.from({ length: 8 }, (_, i) => {
+        const mat = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0x000000 });
+        const px = new THREE.Mesh(new THREE.BoxGeometry(9, 3, 9), mat);
+        px.position.set(-49 + i * 14, 5.5, 0);
+        g.add(px);
+        return mat;
+      });
+      dyn.push(() => {
+        const colors = sim.running ? sim.neoColors[p.id] || [] : [];
+        mats.forEach((m, i) => {
+          const c = Number(colors[i]) || 0;
+          m.color.setHex(c || 0x333333);
+          m.emissive.setHex(c);
+        });
+      });
+    },
     sevenseg(g, p) {
       for (let i = 0; i < 8; i++) leg(g, -31.5 + i * 9, 44, -31.5 + i * 9, 40, 4);
       leg(g, 0, -44, 0, -40, 4);

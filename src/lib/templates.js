@@ -453,4 +453,66 @@ void loop() {
 `,
   },
   { name: 'Classic blink', code: CODE_BLINK },
+  {
+    name: 'DHT11 thermometer', code: `// Wire a DHT11: VCC to 5V, GND to GND, DATA to pin 2.
+// While it runs, drag the sensor (or set it in the inspector) to change the temperature.
+#include <DHT.h>
+DHT dht(2, DHT11);
+
+void setup() {
+  Serial.begin(9600);
+  dht.begin();
+}
+
+void loop() {
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+  if (isnan(t)) {
+    Serial.println("No reading - check the wiring.");
+  } else {
+    Serial.println("temp:" + String(t) + " humidity:" + String(h));
+  }
+  delay(1000);
+}
+`,
+  },
+  {
+    name: 'NeoPixel rainbow', code: `// Wire a NeoPixel strip: VCC to 5V, GND to GND, DIN to pin 6.
+#include <Adafruit_NeoPixel.h>
+Adafruit_NeoPixel strip(8, 6, NEO_GRB + NEO_KHZ800);
+int step = 0;
+
+void setup() {
+  strip.begin();
+  strip.setBrightness(80);
+}
+
+void loop() {
+  for (int i = 0; i < 8; i++) {
+    int k = (step + i * 32) % 256;
+    strip.setPixelColor(i, strip.Color(255 - k, k, (k * 2) % 256));
+  }
+  strip.show();
+  step = (step + 8) % 256;
+  delay(60);
+}
+`,
+  },
+  {
+    name: 'Joystick reader', code: `// Wire a joystick: VCC to 5V, GND to GND, VRX to A0, VRY to A1, SW to pin 2.
+// While it runs, drag the stick; tap it to press its button. Open the Plotter tab.
+void setup() {
+  Serial.begin(9600);
+  pinMode(2, INPUT_PULLUP);
+}
+
+void loop() {
+  int x = analogRead(A0);
+  int y = analogRead(A1);
+  int pressed = digitalRead(2) == LOW;
+  Serial.println("x:" + String(x) + " y:" + String(y) + " button:" + String(pressed));
+  delay(100);
+}
+`,
+  },
 ];

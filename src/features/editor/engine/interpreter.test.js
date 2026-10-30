@@ -53,7 +53,8 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const API_NAMES = [
   'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'tone', 'noTone',
   'delay', 'delayMicroseconds', 'millis', 'micros', 'map', 'constrain', 'random',
-  'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'F', 'Serial', 'pulseIn', '__lcd', '__servo', '__int', '__y',
+  'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'F', 'Serial', 'pulseIn', '__lcd', '__servo', '__dht', '__neo', 'isnan', '__int', '__y',
+  'DHT11', 'DHT22', 'NEO_GRB', 'NEO_RGB', 'NEO_KHZ800',
   'HIGH', 'LOW', 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 'LED_BUILTIN', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5',
 ];
 
@@ -98,6 +99,20 @@ describe('transpile', () => {
     expect(js).toContain('const lcd = __lcd(0x27, 16, 2);');
     expect(js).toContain('const arm = __servo();');
   });
+
+  it('also accepts the older "x = Type(...)" constructor style', () => {
+    const js = transpile('Adafruit_NeoPixel strip = Adafruit_NeoPixel(8, PIN, NEO_GRB + NEO_KHZ800);\nDHT dht = DHT(2, DHT22);\nvoid setup(){}\nvoid loop(){}');
+    expect(js).toContain('const strip = __neo(8, PIN, NEO_GRB + NEO_KHZ800);');
+    expect(js).toContain('const dht = __dht(2, DHT22);');
+    expect(() => new (Object.getPrototypeOf(async function () {}).constructor)('__neo', '__dht', 'PIN', 'NEO_GRB', 'NEO_KHZ800', 'DHT22', js)).not.toThrow();
+  });
+
+  it('rewrites DHT and NeoPixel constructors and awaits sensor reads', () => {
+    const js = transpile('DHT dht(2, DHT11);\nAdafruit_NeoPixel strip(8, 6, NEO_GRB + NEO_KHZ800);\nvoid setup(){}\nvoid loop(){ float t = dht.readTemperature(); }');
+    expect(js).toContain('const dht = __dht(2, DHT11);');
+    expect(js).toContain('const strip = __neo(8, 6, NEO_GRB + NEO_KHZ800);');
+    expect(js).toContain('let t = await dht.readTemperature();');
+  });
 });
 
 describe('createInterpreter (runtime, not just transpile syntax)', () => {
@@ -123,6 +138,71 @@ describe('createInterpreter (runtime, not just transpile syntax)', () => {
       expect(serial).not.toContain('❌');
     });
   }
+
+  it('simulates a DHT11, a joystick and a NeoPixel strip wired to the board', async () => {
+    const { sim } = await import('./engineStore');
+    const doc = buildTemplate('blank');
+    // Off the breadboard, so their pins only connect through the wires below.
+    const part = (id, type, props = {}, x = 0) => ({ id, type, x: 900 + x, y: 900, rot: 0, props });
+    const ardId = doc.parts.find((p) => p.type === 'arduino').id; // template ids are generated
+    const wire = (a, b, i) => ({ id: `w${i}`, a, b: b.replace('ard.', `${ardId}.`), color: '#ffd166' });
+    doc.parts.push(part('dht1', 'dht', { temp: 31.5, hum: 40 }), part('joy1', 'joystick', { x: 1, y: 0.5 }, 200), part('neo1', 'neopixel', {}, 400));
+    doc.wires = [
+      ['dht1.VCC', 'ard.5V'], ['dht1.GND', 'ard.GND1'], ['dht1.DATA', 'ard.D2'],
+      ['joy1.VCC', 'ard.5V'], ['joy1.GND', 'ard.GND1'], ['joy1.VRX', 'ard.A0'], ['joy1.VRY', 'ard.A1'],
+      ['neo1.VCC', 'ard.5V'], ['neo1.GND', 'ard.GND2'], ['neo1.DIN', 'ard.D6'],
+    ].map(([a, b], i) => wire(a, b, i));
+    doc.code = `#include <DHT.h>
+#include <Adafruit_NeoPixel.h>
+DHT dht(2, DHT11);
+Adafruit_NeoPixel strip(8, 6, NEO_GRB + NEO_KHZ800);
+void setup() { Serial.begin(9600); dht.begin(); strip.begin(); strip.setBrightness(128); }
+void loop() {
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+  Serial.println("t=" + String(t) + " h=" + String(h) + " f=" + String(dht.readTemperature(true)));
+  Serial.println("x=" + String(analogRead(A0)) + " y=" + String(analogRead(A1)));
+  strip.setPixelColor(0, strip.Color(255, 0, 0));
+  strip.setPixelColor(1, 0, 255, 0);
+  strip.show();
+  delay(1000);
+}`;
+    let serial = '';
+    const interp = createInterpreter({
+      getDoc: () => doc,
+      serialWrite: (text) => {
+        serial += text;
+      },
+      requestRender: () => {},
+      spawn: loopbackSpawn,
+    });
+    interp.run(doc.code);
+    await vi.waitFor(() => expect(sim.neoColors.neo1?.length).toBe(8), { timeout: 3000 });
+    const colors = sim.neoColors.neo1;
+    interp.stop();
+    expect(serial).not.toContain('❌');
+    expect(serial).toContain('t=31.5 h=40 f=88.7');
+    expect(serial).toMatch(/x=1023 y=51[12]/);
+    expect(colors.slice(0, 3)).toEqual([0x800000, 0x008000, 0]); // dimmed to half by setBrightness(128)
+  });
+
+  it('warns once, and reads NaN, when no DHT sensor is wired to the pin', async () => {
+    const doc = buildTemplate('blank');
+    doc.code = 'DHT dht(2, DHT11);\nvoid setup(){}\nvoid loop(){ Serial.println(isnan(dht.readTemperature()) ? "nan" : "num"); delay(5); }';
+    let serial = '';
+    const interp = createInterpreter({
+      getDoc: () => doc,
+      serialWrite: (text) => {
+        serial += text;
+      },
+      requestRender: () => {},
+      spawn: loopbackSpawn,
+    });
+    interp.run(doc.code);
+    await vi.waitFor(() => expect(serial.match(/nan/g)?.length).toBeGreaterThan(2), { timeout: 3000 });
+    interp.stop();
+    expect(serial.match(/No DHT sensor/g)).toHaveLength(1);
+  });
 
   it('ends the run when the sandbox asks for something outside the allowlist', async () => {
     const doc = buildTemplate('blink');

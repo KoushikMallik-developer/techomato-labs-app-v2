@@ -551,3 +551,76 @@
     width: auto;
   }
 }
+
+.serial-plot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px 12px;
+  background: var(--serial-bg);
+}
+.serial-plot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-family: var(--mono);
+  margin-bottom: 6px;
+}
+.serial-plot svg {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.shortcuts {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 4px;
+}
+.shortcuts td {
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+}
+.shortcuts kbd {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.15));
+}
+
+.lesson-panel {
+  position: absolute;
+  top: 128px;
+  right: 10px;
+  width: min(340px, calc(100% - 20px));
+  max-height: calc(100% - var(--sheet-h) - 200px);
+  overflow: auto;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  z-index: 6;
+}
+.lesson-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lesson-panel-head b {
+  flex: 1;
+}
+.lesson-steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.lesson-steps li {
+  margin: 6px 0;
+}
+.lesson-steps li.done {
+  opacity: 0.6;
+}
+.lesson-steps input {
+  margin-right: 4px;
+}

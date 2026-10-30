@@ -49,6 +49,10 @@ export function transpile(src) {
   s = s.replace(/\bLiquidCrystal_I2C\s+(\w+)\s*\(([^)]*)\)\s*;/g, 'const $1 = __lcd($2);');
   // 3. Servo arm;
   s = s.replace(/\bServo\s+(\w+)\s*;/g, 'const $1 = __servo();');
+  // 3b. DHT dht(DHTPIN, DHT11);  Adafruit_NeoPixel strip(8, 6, NEO_GRB + NEO_KHZ800);
+  // Both `DHT dht(2, DHT11);` and the older `DHT dht = DHT(2, DHT11);` are in tutorials.
+  s = s.replace(/\bDHT\s+(\w+)\s*(?:=\s*DHT\s*)?\(([^)]*)\)\s*;/g, 'const $1 = __dht($2);');
+  s = s.replace(/\bAdafruit_NeoPixel\s+(\w+)\s*(?:=\s*Adafruit_NeoPixel\s*)?\(([^)]*)\)\s*;/g, 'const $1 = __neo($2);');
 
   // 4. #define NAME value
   s = s.replace(/^[ \t]*#define\s+(\w+)\s+(.+)$/gm, 'const $1 = $2;');
@@ -122,6 +126,8 @@ export function transpile(src) {
   const awaitable = ['delay', 'delayMicroseconds', 'pulseIn', 'digitalRead', 'analogRead', ...fns];
   const awRe = new RegExp('(?<![.\\w])(?<!function\\s)(?<!await\\s)(' + awaitable.map(esc).join('|') + ')\\s*\\(', 'g');
   s = s.replace(awRe, 'await $1(');
+  // Sensor reads ask the page, so they are awaited too: dht.readTemperature() -> await dht.readTemperature()
+  s = s.replace(/(?<![.\w])(\w+)\.(readTemperature|readHumidity)\s*\(/g, 'await $1.$2(');
 
   // 11. cooperative yields at the top of every loop body
   s = s.replace(/\b(while\s*\([^{};]*\)|for\s*\([^{}]*\)|do)([ \t]*)\{/g, (m, head, ws) => `${head}${ws}{\n await __y();`);
@@ -250,6 +256,47 @@ function makeApi({ getDoc, log, resolve }, my) {
     return us;
   }
 
+  // Warn once per run, not on every loop() call.
+  function warnOnce(key, msg) {
+    if (sim.warned.has(key)) return;
+    sim.warned.add(key);
+    log(msg);
+  }
+
+  // `kind`: 't' (°C), 'f' (°F) or 'h' (% humidity). NaN, like the real library, when nothing answers.
+  function dhtRead(p, kind) {
+    alive();
+    const doc = getDoc();
+    const [, n] = pinSt(p);
+    const pinNode = sim.node(pinKeyOf(doc, n));
+    const part = doc.parts.find((x) => x.type === 'dht' && pinNode >= 0 && sim.node(x.id + '.DATA') === pinNode);
+    if (!part) {
+      warnOnce('dht-wire', `⚠️ No DHT sensor's DATA pin is wired to ${pinName(n)}.`);
+      return NaN;
+    }
+    if (!sim.dhtOn[part.id]) {
+      warnOnce('dht-power', "⚠️ The DHT sensor isn't powered — check its VCC/GND wiring.");
+      return NaN;
+    }
+    const t = part.props.temp ?? 24;
+    if (kind === 'h') return part.props.hum ?? 50;
+    return kind === 'f' ? (t * 9) / 5 + 32 : t;
+  }
+
+  // strip.show(): the colours (0xRRGGBB) the sketch set, dimmed by setBrightness.
+  function neoShow(p, colors, brightness) {
+    alive();
+    const [, n] = pinSt(p);
+    if (!Array.isArray(colors) || colors.length > 64) throw new Error('A NeoPixel strip can have up to 64 LEDs here.');
+    const k = clamp(Number(brightness) || 0, 0, 255) / 255;
+    const dim = (c, shift) => Math.round((((c >> shift) & 255) * k)) << shift;
+    sim.neoByPin[n] = colors.map((c) => {
+      const v = Number(c) >>> 0;
+      return dim(v, 16) | dim(v, 8) | dim(v, 0);
+    });
+    resolve();
+  }
+
   function __lcd() {
     sim.lcd.init = true;
     return {
@@ -325,8 +372,8 @@ function makeApi({ getDoc, log, resolve }, my) {
 
   return {
     // Math, timing and constants live in public/sandbox.html; only what touches the board is here.
-    names: ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'tone', 'noTone', 'Serial', 'pulseIn', '__lcd', '__servo'],
-    values: [pinMode, digitalWrite, digitalRead, analogRead, analogWrite, tone, noTone, Serial, pulseIn, __lcd, __servo],
+    names: ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'tone', 'noTone', 'Serial', 'pulseIn', '__lcd', '__servo', 'dhtRead', 'neoShow'],
+    values: [pinMode, digitalWrite, digitalRead, analogRead, analogWrite, tone, noTone, Serial, pulseIn, __lcd, __servo, dhtRead, neoShow],
   };
 }
 
@@ -350,7 +397,7 @@ function iframeSpawn(onMessage) {
   };
 }
 
-const RPC = ['pinMode', 'digitalWrite', 'analogWrite', 'tone', 'noTone', 'digitalRead', 'analogRead', 'pulseIn'];
+const RPC = ['pinMode', 'digitalWrite', 'analogWrite', 'tone', 'noTone', 'digitalRead', 'analogRead', 'pulseIn', 'dhtRead', 'neoShow'];
 const REMOTE_OBJECTS = ['__lcd', '__servo'];
 // shortcut: a flat cap per second; raise it if a legitimate sketch ever trips it, or drop it once calls are batched.
 const MAX_CALLS_PER_SECOND = 2000; // each pin call re-solves the circuit (~1 ms), so far more than this saturates the page

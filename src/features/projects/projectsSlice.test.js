@@ -96,7 +96,7 @@ describe('projectsSlice', () => {
     api.importProject.mockResolvedValue({ id: 'p-imported', name: 'Imported circuit' });
     const store = makeStore();
     const json = JSON.stringify({ name: 'Imported circuit', parts: [], wires: [], code: '' });
-    await store.dispatch(importProject(json));
+    await store.dispatch(importProject({ text: json, fileName: "c.json" }));
     expect(api.importProject).toHaveBeenCalledWith({ name: 'Imported circuit', parts: [], wires: [], code: '' });
     expect(selectProjectsState(store.getState()).items).toEqual([{ id: 'p-imported', name: 'Imported circuit' }]);
   });

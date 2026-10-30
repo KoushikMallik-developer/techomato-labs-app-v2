@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   loadProject, reset, selectEditor,
@@ -13,6 +13,8 @@ import PartsDock from '../components/PartsDock';
 import ZoomControls from '../components/ZoomControls';
 import Inspector from '../components/Inspector';
 import ConsolePanel from '../components/ConsolePanel';
+import LessonPanel from '@/features/lessons/components/LessonPanel';
+import { lessonById } from '@/features/lessons/lessons';
 import { createInterpreter } from '../engine/interpreter';
 import { solveCircuit } from '../engine/solver';
 import { updateBuzzer, stopBuzzer } from '../engine/audio';
@@ -25,6 +27,8 @@ export default function EditorPage() {
   const { id } = useParams();
   const dispatch = useDispatch();
   const editor = useSelector(selectEditor);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const lesson = lessonById(searchParams.get('lesson'));
   const engineRef = useRef(null);
   const engine3DRef = useRef(null);
   const [status, setStatus] = useState('');
@@ -163,6 +167,7 @@ export default function EditorPage() {
           running={editor.running}
           projectId={editor.projectId}
           live={editor.approved}
+          selection={editor.selection}
           onAudioWarn={(msg) => writeSerial(msg + '\n')}
         />
         <PartsDock
@@ -174,6 +179,7 @@ export default function EditorPage() {
           onZoomOut={() => (is3D ? engine3DRef.current : engineRef.current)?.zoomOut()}
           onFit={() => (is3D ? engine3DRef.current?.fit() : engineRef.current?.fitView())}
         />
+        {lesson && <LessonPanel lesson={lesson} onClose={() => setSearchParams({}, { replace: true })} />}
         <Inspector selection={editor.selection} parts={editor.parts} running={editor.running} />
         <div className="editor-readout">
           <span className={`dot${editor.running ? ' live' : ''}`} />

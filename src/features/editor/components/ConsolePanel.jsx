@@ -1,6 +1,7 @@
 import { useDispatch } from 'react-redux';
 import { setCode, loadExampleCode, setActiveTab, toggleSheetCollapsed } from '../editorSlice';
 import { EXAMPLES } from '@/lib/templates';
+import SerialPlot from './SerialPlot';
 
 export default function ConsolePanel({ code, activeTab, serialText, onClearSerial }) {
   const dispatch = useDispatch();
@@ -44,6 +45,9 @@ export default function ConsolePanel({ code, activeTab, serialText, onClearSeria
         <button className={`editor-tab${activeTab === 'serial' ? ' on' : ''}`} onClick={() => onTab('serial')}>
           Serial
         </button>
+        <button className={`editor-tab${activeTab === 'plot' ? ' on' : ''}`} onClick={() => onTab('plot')}>
+          Plotter
+        </button>
         <span className="editor-file">sketch.ino</span>
         <select aria-label="Load an example sketch" defaultValue="" onChange={onExample}>
           <option value="">Examples&hellip;</option>
@@ -77,6 +81,9 @@ export default function ConsolePanel({ code, activeTab, serialText, onClearSeria
         <pre className="editor-serial">
           {serialText || 'Serial output shows up here when you press Run.'}
         </pre>
+      </div>
+      <div className={`editor-pane${activeTab === 'plot' ? ' on' : ''}`}>
+        {activeTab === 'plot' && <SerialPlot serialText={serialText} />}
       </div>
     </section>
   );

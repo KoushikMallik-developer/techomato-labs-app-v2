@@ -262,6 +262,10 @@ export function createBoardEngine(svgEl, callbacks) {
           drag = { mode: 'sonar', part: p, lx: w[0], ly: w[1] };
         } else if (p.type === 'ldr') {
           drag = { mode: 'ldr', part: p, lx: w[0], ly: w[1] };
+        } else if (p.type === 'dht') {
+          drag = { mode: 'dht', part: p, lx: w[0], ly: w[1] };
+        } else if (p.type === 'joystick') {
+          drag = { mode: 'joystick', part: p, sx: w[0], sy: w[1], moved: false };
         } else if (p.type === 'toggle') {
           p.props.on = !p.props.on;
           callbacks.onSetPartProp?.(p.id, 'on', p.props.on);
@@ -347,6 +351,20 @@ export function createBoardEngine(svgEl, callbacks) {
       drag.ly = w[1];
       drag.part.props.light = clamp((drag.part.props.light ?? 70) + d, 0, 100);
       callbacks.onLiveResolve?.();
+    } else if (drag.mode === 'dht') {
+      const d = (w[0] - drag.lx - (w[1] - drag.ly)) * 0.3;
+      drag.lx = w[0];
+      drag.ly = w[1];
+      drag.part.props.temp = Math.round(clamp((drag.part.props.temp ?? 24) + d, -40, 80) * 10) / 10;
+      schedule();
+    } else if (drag.mode === 'joystick') {
+      // shortcut: the stick follows the pointer in screen axes, ignoring the part's rotation.
+      const dx = w[0] - drag.sx;
+      const dy = w[1] - drag.sy;
+      if (Math.hypot(dx, dy) > 2) drag.moved = true;
+      drag.part.props.x = clamp(0.5 + dx / 40, 0, 1);
+      drag.part.props.y = clamp(0.5 + dy / 40, 0, 1);
+      callbacks.onLiveResolve?.();
     }
   }
 
@@ -365,6 +383,21 @@ export function createBoardEngine(svgEl, callbacks) {
     if (drag.mode === 'pot') callbacks.onSetPartProp?.(drag.part.id, 'pos', drag.part.props.pos);
     if (drag.mode === 'sonar') callbacks.onSetPartProp?.(drag.part.id, 'cm', drag.part.props.cm);
     if (drag.mode === 'ldr') callbacks.onSetPartProp?.(drag.part.id, 'light', drag.part.props.light);
+    if (drag.mode === 'dht') callbacks.onSetPartProp?.(drag.part.id, 'temp', drag.part.props.temp);
+    if (drag.mode === 'joystick') {
+      // A real stick springs back to the middle; a tap without moving presses its button.
+      const part = drag.part;
+      part.props.x = 0.5;
+      part.props.y = 0.5;
+      if (!drag.moved) {
+        part.pressed = true;
+        setTimeout(() => {
+          part.pressed = false;
+          callbacks.onLiveResolve?.();
+        }, 300);
+      }
+      callbacks.onLiveResolve?.();
+    }
     if (drag.mode === 'pan' && !drag.moved && !running) {
       pending = null;
       setSelection(null);

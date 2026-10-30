@@ -1431,7 +1431,10 @@
   }
   .tabbar {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    /* up to seven items: one row that scrolls sideways instead of wrapping into a tall bar */
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(76px, 1fr);
+    overflow-x: auto;
     position: fixed;
     left: 0;
     right: 0;
@@ -1457,4 +1460,82 @@
     color: var(--accent);
     font-weight: 700;
   }
+}
+
+.lesson-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: var(--r-md);
+}
+.lesson-card .thumb {
+  aspect-ratio: 16 / 10;
+}
+.lesson-card .tag {
+  align-self: flex-start;
+}
+.lesson-card .btn {
+  margin-top: auto;
+}
+
+.side-link .badge,
+.tabbar .badge {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #000;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+.notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.notif {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+}
+.notif.unread {
+  border-left: 3px solid var(--accent);
+}
+.thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.thread-card {
+  display: block;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  color: inherit;
+  text-decoration: none;
+}
+.thread-card h3 {
+  margin: 0 0 4px;
+}
+.thread-body {
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+.post {
+  padding: 10px 0;
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+}
+.post .post-text {
+  white-space: pre-wrap;
+  margin: 4px 0;
+}
+.post-replies {
+  margin-left: 24px;
 }

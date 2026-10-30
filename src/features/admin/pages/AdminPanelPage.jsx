@@ -4,6 +4,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import CircuitThumbnail from '@/components/CircuitThumbnail';
 import BrandMark from '@/components/BrandMark';
 import { openModal } from '@/features/ui/uiSlice';
+import ReportsSection from '../components/ReportsSection';
 import {
   fetchPending,
   fetchUsers,
@@ -133,6 +134,8 @@ export default function AdminPanelPage() {
             ))}
           </div>
         )}
+
+        <ReportsSection />
 
         <div className="head" style={{ marginTop: 40 }}>
           <div>

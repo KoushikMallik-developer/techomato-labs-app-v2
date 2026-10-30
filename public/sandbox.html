@@ -56,8 +56,33 @@ function sketchWorker() {
       };
       return self;
     },
+    __dht: (pin) => ({
+      begin() {},
+      readTemperature: (fahrenheit) => ask('dhtRead', [pin, fahrenheit ? 'f' : 't']),
+      readHumidity: () => ask('dhtRead', [pin, 'h']),
+    }),
+    // Adafruit_NeoPixel: the colours live here; show() sends them to the page in one call.
+    __neo: (n, pin) => {
+      const count = clamp(Math.trunc(n) || 0, 0, 64);
+      const px = new Array(count).fill(0);
+      let bright = 255;
+      const color = (r, g, b) => (((r & 255) << 16) | ((g & 255) << 8) | (b & 255)) >>> 0;
+      return {
+        begin() {},
+        numPixels: () => count,
+        Color: color,
+        setBrightness: (b) => { bright = clamp(b, 0, 255); },
+        setPixelColor: (i, r, g, b) => { if (i >= 0 && i < count) px[i] = g === undefined ? (r >>> 0) & 0xffffff : color(r, g, b); },
+        getPixelColor: (i) => px[i] ?? 0,
+        fill: (c = 0, first = 0, len = count) => { for (let i = first; i < Math.min(count, first + len); i++) px[i] = c >>> 0; },
+        clear: () => px.fill(0),
+        show: () => tell('neoShow', [pin, px.slice(), bright]),
+      };
+    },
+    isnan: Number.isNaN,
     __int: (x) => { const n = Math.trunc(Number(x)); return Number.isFinite(n) ? n : 0; },
     __y: async () => { if (++yields % 50 === 0) await sleep(0); },
+    DHT11: 11, DHT22: 22, NEO_GRB: 0, NEO_RGB: 0, NEO_KHZ800: 0,
     HIGH: 1, LOW: 0, INPUT: 'INPUT', OUTPUT: 'OUTPUT', INPUT_PULLUP: 'INPUT_PULLUP', LED_BUILTIN: 13,
     A0: 14, A1: 15, A2: 16, A3: 17, A4: 18, A5: 19,
   };

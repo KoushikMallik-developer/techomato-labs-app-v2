@@ -356,3 +356,43 @@ describe('createBoardEngine — keyboard and public API', () => {
     expect(() => engine.fitView()).not.toThrow();
   });
 });
+
+describe('createBoardEngine — joystick', () => {
+  const joy = () => ({ id: 'joy-1', type: 'joystick', x: 300, y: 300, rot: 0, props: { x: 0.5, y: 0.5 } });
+
+  async function runningBoard() {
+    const callbacks = makeCallbacks();
+    const svg = makeSvg();
+    const engine = createBoardEngine(svg, callbacks);
+    engine.mount();
+    engine.setDoc({ parts: [joy()], wires: [], running: true });
+    await new Promise((r) => requestAnimationFrame(r));
+    const stick = svg.querySelector('[data-part="joy-1"] [data-ctl]');
+    return { svg, engine, callbacks, stick, part: () => engine.getDoc().parts[0] };
+  }
+
+  it('follows a drag, then springs back to the middle without pressing the button', async () => {
+    const { svg, stick, part, callbacks } = await runningBoard();
+    pointer('pointerdown', stick, { clientX: 300, clientY: 300 });
+    pointer('pointermove', svg, { clientX: 320, clientY: 300 });
+    expect(part().props.x).toBe(1);
+    expect(callbacks.onLiveResolve).toHaveBeenCalled();
+    pointer('pointerup', svg, { clientX: 320, clientY: 300 });
+    expect(part().props).toMatchObject({ x: 0.5, y: 0.5 });
+    expect(part().pressed).toBeFalsy();
+  });
+
+  it('a tap presses its button briefly', async () => {
+    const { svg, stick, part } = await runningBoard(); // before fake timers: it waits for a frame
+    vi.useFakeTimers();
+    try {
+      pointer('pointerdown', stick, { clientX: 300, clientY: 300 });
+      pointer('pointerup', svg, { clientX: 300, clientY: 300 });
+      expect(part().pressed).toBe(true);
+      vi.advanceTimersByTime(300);
+      expect(part().pressed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

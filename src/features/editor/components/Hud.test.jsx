@@ -133,4 +133,53 @@ describe('Hud', () => {
     renderHud();
     expect(screen.getByLabelText('Back to your projects')).toHaveAttribute('href', '/projects');
   });
+
+  it('keyboard: Ctrl+S saves, ? lists the shortcuts, R rotates the selected part, 3 switches to 3D', async () => {
+    api.save.mockResolvedValue({ id: 'p-1', approved: false });
+    const part = { id: 'led-1', type: 'led', x: 0, y: 0, rot: 0, props: { color: 'red' } };
+    const editor = editorState({ projectId: 'p-1', saveState: 'dirty', parts: [part] });
+    const { store } = renderHud({ saveState: 'dirty', selection: { kind: 'part', id: 'led-1' } }, { editor });
+
+    fireEvent.keyDown(document, { key: 's', ctrlKey: true });
+    await waitFor(() => expect(api.save).toHaveBeenCalled());
+
+    fireEvent.keyDown(document, { key: '?' });
+    expect(selectModal(store.getState()).type).toBe('shortcuts');
+
+    fireEvent.keyDown(document, { key: 'r' });
+    expect(store.getState().editor.parts[0].rot).toBe(90);
+
+    fireEvent.keyDown(document, { key: '3' });
+    expect(store.getState().editor.view).toBe('3d');
+  });
+
+  it('keyboard: plain keys do nothing while typing in a field', () => {
+    const part = { id: 'led-1', type: 'led', x: 0, y: 0, rot: 0, props: { color: 'red' } };
+    const { store } = renderHud({ selection: { kind: 'part', id: 'led-1' } }, { editor: editorState({ parts: [part] }) });
+    fireEvent.keyDown(screen.getByLabelText('Project name'), { key: 'r' });
+    expect(store.getState().editor.parts[0].rot).toBe(0);
+  });
+
+  it('keyboard: ignores shortcuts while a dialog is open', () => {
+    const part = { id: 'led-1', type: 'led', x: 0, y: 0, rot: 0, props: { color: 'red' } };
+    const { store } = renderHud({ selection: { kind: 'part', id: 'led-1' } }, { editor: editorState({ parts: [part] }) });
+    const dialog = document.createElement('div');
+    dialog.className = 'modal-back';
+    document.body.appendChild(dialog);
+    fireEvent.keyDown(document, { key: 'r' });
+    dialog.remove();
+    expect(store.getState().editor.parts[0].rot).toBe(0);
+  });
+
+  it('keyboard: Ctrl+S behind a dialog is swallowed, not sent to the browser and not saved', () => {
+    renderHud({ saveState: 'dirty' }, { editor: editorState({ projectId: 'p-1', saveState: 'dirty' }) });
+    const dialog = document.createElement('div');
+    dialog.className = 'modal-back';
+    document.body.appendChild(dialog);
+    const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(event);
+    dialog.remove();
+    expect(event.defaultPrevented).toBe(true);
+    expect(api.save).not.toHaveBeenCalled();
+  });
 });

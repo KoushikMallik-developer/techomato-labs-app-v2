@@ -38,7 +38,10 @@ src/
     ui/           # modal + toast host state
     landing/      # marketing landing page
     projects/     # your projects dashboard + folder/tag/publish/import modals
-    gallery/      # public gallery + circuit detail page + comments
+    gallery/      # Community Circuits, circuit page, comments, saved circuits, public profiles (/u/:handle), reports
+    discussions/  # Discussions: posts, comments, one level of replies, likes
+    notifications/# likes/comments on your circuits and replies to your discussions
+    lessons/      # guided lessons (static) and the step panel shown in the editor
     settings/     # profile/appearance/password/account settings
     editor/       # the circuit editor (engine/ holds the 2D/3D render + solver + Arduino interpreter)
 ```
@@ -65,6 +68,18 @@ output (LED brightness, servo angle, live sensor readings, buzzer state) lives i
 | `render3d.js` | three.js 3D view (lazy-loaded, code-split out of the main bundle) |
 | `engineStore.js` | The `sim` singleton — fast-changing simulation output kept outside Redux |
 
+## Features
+
+- **Editor:** 2D/3D board, 21 parts besides the breadboard and Arduino (including a DHT11 sensor, joystick and 8-LED NeoPixel strip), Arduino sketches
+  with `Servo`, `LiquidCrystal_I2C`, `DHT` and `Adafruit_NeoPixel`, a serial monitor and a serial **plotter**, keyboard
+  shortcuts (press `?`), import of exported `.json` circuits and Arduino `.ino` sketches.
+- **Community Circuits:** search (typing filters what is loaded; Enter searches every circuit by the start of its name),
+  tags, likes, comments, remix, **Save** for later (`/saved`), **Report** (reviewed in the admin panel), **Download image**
+  (PNG), public author pages (`/u/<handle>`), built-in sample circuits by `@dev`.
+- **Discussions** (`/discussions`): posts, comments, replies to comments, likes.
+- **Notifications** (`/notifications`): likes and comments on your circuits, replies to your discussions.
+- **Lessons** (`/lessons`): step-by-step projects that open in the editor with the steps beside it.
+
 ## Status
 
 Fully working end-to-end against Firebase: app shell, auth, projects dashboard, gallery, and settings are
@@ -81,7 +96,8 @@ wired up, and the circuit editor has a complete 2D drag-and-wire board, MNA circ
 4. **Firestore** -> create a database. Then, from this folder: `npm i -g firebase-tools`, `firebase login`,
    `firebase use --add` (pick your project; this creates `.firebaserc`), and deploy the rules and indexes with
    `firebase deploy --only firestore`.
-   **Wait until the three `projects` indexes show "Enabled"** (Firestore -> Indexes) — the gallery errors until then.
+   **Wait until every index shows "Enabled"** (Firestore -> Indexes) — the gallery and search error until then.
+   Run `firebase deploy --only firestore` again whenever `firestore.rules` or `firestore.indexes.json` change.
    **Never leave the database in test mode** — `firestore.rules` is the only thing protecting your data.
    Before deploying rule changes, run `npm run test:rules` (needs a recent JDK, 21 or newer, for the Firestore emulator).
 5. **Admin**: create a normal account in Authentication, then add a document `admins/<that user's uid>` (any fields)
@@ -102,7 +118,11 @@ wired up, and the circuit editor has a complete 2D drag-and-wire board, MNA circ
    (it runs other users' sketch code in a locked-down iframe). After a deploy, open the editor, press Run on a sample
    circuit and check the browser console for CSP errors; also check Google/GitHub sign-in.
 
-Limits baked into the rules: 5 circuits, 3 folders and 500 follows per user, a cooldown between new circuits (30 s) and comments (10 s), project
-lists capped at 100 (a circuit page shows its newest 50 comments). Known limits: the gallery loads 10 circuits at a time and search / "Following" / "Most liked" only
+Limits baked into the rules: 5 circuits, 3 folders, 500 follows and 200 saved circuits per user, one report per user per
+circuit, a cooldown between new circuits (30 s), new discussions (60 s) and comments or discussion replies (10 s), project
+lists capped at 100 (a circuit page shows its newest 50 comments, a discussion its first 100 comments and replies).
+Notifications are written by the person who acts, and the rules only accept one that matches a real like, comment or
+reply of theirs. There are no follow notifications (finding who owns a handle needs a server). Circuits shared before
+the search existed only show up in name search after their owner saves them once. Known limits: the gallery loads 10 circuits at a time and search / "Following" / "Most liked" only
 see what is loaded; deleting a circuit leaves its likes/comments orphaned (unreachable); if you delete a user's circuit
 in the Firestore console, lower `limits/<uid>.projectCount` by hand; admin and user share one Firebase session.

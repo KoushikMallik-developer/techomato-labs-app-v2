@@ -2,6 +2,7 @@ import { registerCoreModals } from '@/components/registerCoreModals';
 import { registerProjectsModals } from '@/features/projects/registerModals';
 import { registerGalleryModals } from '@/features/gallery/registerModals';
 import { registerAdminModals } from '@/features/admin/registerModals';
+import { registerEditorModals } from '@/features/editor/registerModals';
 
 /** Called once at startup so every feature's modal dialogs are known to <Modal/>. */
 export function registerAllModals() {
@@ -9,4 +10,5 @@ export function registerAllModals() {
   registerProjectsModals();
   registerGalleryModals();
   registerAdminModals();
+  registerEditorModals();
 }

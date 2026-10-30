@@ -59,7 +59,8 @@ export default function GalleryCard({ item, liked, onLike }) {
         )}
       </div>
       <div className="pcard-foot">
-        <button className={`like${liked ? ' on' : ''}`} onClick={() => onLike(item.id)}>
+        {/* Without onLike (e.g. a profile page) the count is shown but cannot be clicked. */}
+        <button className={`like${liked ? ' on' : ''}`} disabled={!onLike} onClick={() => onLike?.(item.id)}>
           <HeartIcon /> {item.likeCount ?? 0}
         </button>
       </div>

@@ -49,9 +49,12 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { sanitizeCircuit } from '@/lib/sanitizeCircuit';
-import { MAX_FOLDERS, MAX_FOLLOWS, MAX_PROJECTS } from '@/lib/limits';
+import { MAX_BOOKMARKS, MAX_FOLDERS, MAX_FOLLOWS, MAX_PROJECTS } from '@/lib/limits';
 import { buildTemplate } from '@/lib/templates';
 import { getSamples, getSample, isSampleId, SAMPLE_AUTHOR } from '@/lib/samples';
+
+// firestore.rules' lower() only lowercases A-Z, so the stored search copies must too ("Élan" -> "Élan").
+const lowerAscii = (s) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
 
 const MAX_TAGS = 10;
 const TAG_RE = /^[a-z0-9][a-z0-9 _-]{0,31}$/;
@@ -59,6 +62,11 @@ const HANDLE_RE = /^[A-Za-z0-9_]{1,64}$/;
 const GALLERY_PAGE = 10;
 const COMMENTS_SHOWN = 50;
 const USERS_PAGE = 20;
+const SEARCH_SHOWN = 24;
+const REPORTS_SHOWN = 50;
+const THREADS_PAGE = 15;
+const POSTS_SHOWN = 100; // the rules' list limit for a thread's posts
+const NOTIFICATIONS_SHOWN = 30;
 const LIST_LIMIT = 100; // the rules refuse project lists without a limit of at most 100
 const FOLLOWING_FILTER = '__following__';
 const STARTER_TEMPLATE = 'parking';
@@ -160,10 +168,12 @@ const cleanParts = (parts) => parts.map(({ pressed: _pressed, triggered: _trigge
 
 // parts/wires are stored as JSON strings: Firestore rejects nested arrays and `undefined`.
 function newProjectDoc(ownerId, author, { name, parts, wires, code }, t = now()) {
+  const cleanName = (name || '').trim().slice(0, 120) || 'Untitled circuit';
   return {
     ownerId,
     author,
-    name: (name || '').trim().slice(0, 120) || 'Untitled circuit',
+    name: cleanName,
+    nameLower: lowerAscii(cleanName), // for the Community search (prefix match)
     description: '',
     tags: [],
     folder: null,
@@ -223,8 +233,8 @@ async function createProfile(fbUser, name) {
     const handle = `${base}_${suffix.slice(-size)}`;
     const batch = writeBatch(db);
     batch.set(ref('handles', handle), { uid: fbUser.uid });
-    const profile = { name: cleanName, nameLower: cleanName.toLowerCase(), handle, avatar: '', createdAt: t };
-    batch.set(ref('users', fbUser.uid), { ...profile, email: (fbUser.email || '').toLowerCase() });
+    const profile = { name: cleanName, nameLower: lowerAscii(cleanName), handle, avatar: '', createdAt: t };
+    batch.set(ref('users', fbUser.uid), { ...profile, email: lowerAscii(fbUser.email || '') });
     const starterRef = doc(collection(db, 'projects'));
     batch.set(starterRef, newProjectDoc(fbUser.uid, handle, starter, t));
     batch.set(ref('limits', fbUser.uid), { project: serverTimestamp(), projectId: starterRef.id, projectCount: increment(1) }, { merge: true });
@@ -354,9 +364,13 @@ async function setLike(id, wanted) {
   if (isSampleId(id)) throw fail('Sample circuits cannot be liked.', 'validation_error');
   const projectRef = ref('projects', id);
   const likeRef = ref('users', uid(), 'likes', id);
-  return runTransaction(db, async (tx) => {
+  let owner = null;
+  let title = '';
+  const result = await runTransaction(db, async (tx) => {
     const [project, like] = await Promise.all([tx.get(projectRef), tx.get(likeRef)]);
     if (!project.exists() || !project.data().approved) throw fail('Circuit not found.', 'not_found');
+    owner = project.data().ownerId;
+    title = text(project.data().name, 140);
     const count = project.data().likeCount || 0;
     if (like.exists() === wanted) return { liked: wanted, likeCount: count };
     if (wanted) tx.set(likeRef, { createdAt: now() });
@@ -364,7 +378,47 @@ async function setLike(id, wanted) {
     tx.update(projectRef, { likeCount: increment(wanted ? 1 : -1) });
     return { liked: wanted, likeCount: count + (wanted ? 1 : -1) };
   });
+  if (wanted) await notify(owner, `like_${id}_${uid()}`, { type: 'like', targetId: id, ref: '', text: title });
+  return result;
 }
+
+/**
+ * Tells `to` about something the signed-in user just did. Best effort: the action already happened, and a
+ * notification the rules refuse (e.g. the same like again) is simply not sent. The id names the cause.
+ */
+async function notify(to, id, { from, ...data }) {
+  if (!to || to === uid()) return;
+  try {
+    const handle = from ?? (await profile()).handle;
+    await setDoc(ref('users', to, 'notifications', id), {
+      ...data,
+      text: (data.text || '').slice(0, 140),
+      from: handle,
+      read: false,
+      createdAt: now(),
+    });
+  } catch {
+    // not sent; nothing to undo
+  }
+}
+
+/** A discussion thread or post, read defensively like projectFrom. */
+const threadFrom = (d) => {
+  const t = d.data();
+  const likedBy = Array.isArray(t.likedBy) ? t.likedBy : [];
+  return {
+    id: d.id,
+    userId: text(t.userId, 128),
+    author: text(t.author, 64),
+    title: text(t.title, 140),
+    body: text(t.body, 5000),
+    text: text(t.text, 2000),
+    parentId: typeof t.parentId === 'string' ? t.parentId : null,
+    likeCount: likedBy.length,
+    liked: !!auth.currentUser && likedBy.includes(auth.currentUser.uid),
+    createdAt: ms(t.createdAt),
+  };
+};
 
 export const api = {
   // ---- auth ----
@@ -413,7 +467,7 @@ export const api = {
       const name = patch.name.trim();
       if (!name || name.length > 120) throw fail('Enter your name.', 'validation_error');
       update.name = name;
-      update.nameLower = name.toLowerCase();
+      update.nameLower = lowerAscii(name);
     }
     if (patch.avatar !== undefined) update.avatar = String(patch.avatar).slice(0, 32);
     await updateDoc(ref('users', uid()), update);
@@ -440,11 +494,20 @@ export const api = {
     // Unlike first: the rules only allow dropping a like together with the counter decrement.
     await Promise.allSettled([...(await likedIds())].map((projectId) => setLike(projectId, false)));
     const refsOf = async (q) => (await getDocs(q)).docs.map((d) => d.ref);
+    // Notifications and threads are listed 50 at a time (the rules' limit), so delete page by page.
+    const drain = async (q) => {
+      for (let refs = await refsOf(q); refs.length; refs = await refsOf(q)) await deleteAll(refs);
+    };
+    await drain(query(collection(db, 'users', id, 'notifications'), limit(50)));
+    await drain(query(collection(db, 'threads'), where('userId', '==', id), limit(50)));
     await deleteAll([
       ...(await refsOf(query(collection(db, 'projects'), where('ownerId', '==', id), limit(LIST_LIMIT)))),
       ...(await refsOf(query(collection(db, 'folders'), where('ownerId', '==', id)))),
+      ...(await refsOf(query(collection(db, 'reports'), where('userId', '==', id), limit(LIST_LIMIT)))),
       ...(await refsOf(query(collectionGroup(db, 'comments'), where('userId', '==', id)))),
+      ...(await refsOf(query(collectionGroup(db, 'posts'), where('userId', '==', id)))),
       ref('follows', id),
+      ref('bookmarks', id),
       ref('handles', handle),
       ref('users', id),
     ]);
@@ -511,7 +574,7 @@ export const api = {
   // handle, email or name (Firestore has no substring search) and shows the first USERS_PAGE of each, without paging.
   adminUsers: wrap(async ({ q = '', after } = {}) => {
     const users = collection(db, 'users');
-    const needle = q.trim().toLowerCase();
+    const needle = lowerAscii(q.trim());
     let docs;
     let cursor = null;
     if (needle) {
@@ -595,6 +658,20 @@ export const api = {
       tx.update(projectRef, { approved: true, approvedAt: now() });
     });
   }),
+  // Newest reports first; each names the circuit, so the panel can link to it.
+  adminReports: wrap(async () => {
+    const snap = await getDocs(query(collection(db, 'reports'), orderBy('createdAt', 'desc'), limit(REPORTS_SHOWN)));
+    return snap.docs.map((d) => ({
+      id: d.id,
+      projectId: text(d.data().projectId, 64),
+      reason: text(d.data().reason, 500),
+      createdAt: ms(d.data().createdAt),
+    }));
+  }),
+  dismissReport: wrap(async (id) => {
+    await deleteDoc(ref('reports', id));
+    return id;
+  }),
   rejectCircuit: wrap(async (id) => {
     await updateDoc(ref('projects', id), { published: false, approved: false, approvedAt: null });
   }),
@@ -620,6 +697,7 @@ export const api = {
     if (patch.name !== undefined) {
       if (!patch.name.trim()) throw fail('Name cannot be blank.', 'validation_error');
       update.name = patch.name.trim().slice(0, 120);
+      update.nameLower = lowerAscii(update.name);
     }
     if (patch.parts) update.parts = JSON.stringify(cleanParts(patch.parts));
     if (patch.wires) update.wires = JSON.stringify(patch.wires);
@@ -771,7 +849,7 @@ export const api = {
     if (clean.length > 2000) throw fail('Comments can be up to 2000 characters.', 'validation_error');
     if (isSampleId(itemId)) throw fail('Comments are closed on sample circuits.', 'validation_error');
     await requireVerified();
-    const { name } = await profile();
+    const { name, handle } = await profile();
     const data = { userId: uid(), name, text: clean, createdAt: now() };
     const commentRef = doc(collection(db, 'projects', itemId, 'comments'));
     const batch = writeBatch(db);
@@ -780,10 +858,179 @@ export const api = {
     await batch.commit().catch((e) => {
       throw slowDown(e);
     });
+    const owner = (await getDoc(ref('projects', itemId)).catch(() => null))?.data()?.ownerId;
+    await notify(owner, `comment_${commentRef.id}`, { type: 'comment', targetId: itemId, ref: commentRef.id, text: '', from: handle });
     return { ...data, id: commentRef.id };
   }),
   deleteComment: wrap(async (itemId, commentId) => {
     await deleteDoc(ref('projects', itemId, 'comments', commentId));
+  }),
+
+  // ---- discussions ----
+  threads: wrap(async ({ after } = {}) => {
+    const snap = await getDocs(
+      query(
+        collection(db, 'threads'),
+        orderBy('createdAt', 'desc'),
+        ...(after == null ? [] : [startAfter(after)]),
+        limit(THREADS_PAGE),
+      ),
+    );
+    // No reply counts here: one count query per thread would double the cost of every list view.
+    const items = snap.docs.map(threadFrom);
+    return { items, cursor: snap.size === THREADS_PAGE ? ms(snap.docs.at(-1).data().createdAt) : null };
+  }),
+  // shortcut: shows the first POSTS_SHOWN comments and replies only; add paging when a thread needs more.
+  thread: wrap(async (id) => {
+    const snap = await getDoc(ref('threads', id));
+    if (!snap.exists()) return null;
+    const posts = await getDocs(query(collection(db, 'threads', id, 'posts'), orderBy('createdAt'), limit(POSTS_SHOWN)));
+    return { ...threadFrom(snap), posts: posts.docs.map(threadFrom) };
+  }),
+  createThread: wrap(async ({ title, body }) => {
+    const cleanTitle = (title || '').trim();
+    const cleanBody = (body || '').trim();
+    if (cleanTitle.length < 3) throw fail('Give your post a title of at least 3 characters.', 'validation_error');
+    if (cleanTitle.length > 140) throw fail('Titles can be up to 140 characters.', 'validation_error');
+    if (!cleanBody) throw fail('Write something first.', 'validation_error');
+    if (cleanBody.length > 5000) throw fail('Posts can be up to 5000 characters.', 'validation_error');
+    await requireVerified();
+    const { handle } = await profile();
+    const threadRef = doc(collection(db, 'threads'));
+    const data = { userId: uid(), author: handle, title: cleanTitle, body: cleanBody, likedBy: [], createdAt: now() };
+    const batch = writeBatch(db);
+    batch.set(threadRef, data);
+    batch.set(ref('limits', uid()), { thread: serverTimestamp(), threadId: threadRef.id }, { merge: true });
+    await batch.commit().catch((e) => {
+      if (e.code === 'permission-denied') throw fail('You can start one discussion a minute. Try again soon.', 'throttled');
+      throw e;
+    });
+    return { ...threadFrom({ id: threadRef.id, data: () => data }), posts: [] };
+  }),
+  // A comment on a thread (parentId null) or a reply to one of its comments.
+  addPost: wrap(async (threadId, body, parentId = null) => {
+    const clean = (body || '').trim();
+    if (!clean) throw fail('Write something first.', 'validation_error');
+    if (clean.length > 2000) throw fail('Comments can be up to 2000 characters.', 'validation_error');
+    await requireVerified();
+    const { handle } = await profile();
+    const postRef = doc(collection(db, 'threads', threadId, 'posts'));
+    const data = { userId: uid(), author: handle, text: clean, parentId, likedBy: [], createdAt: now() };
+    const batch = writeBatch(db);
+    batch.set(postRef, data);
+    batch.set(ref('limits', uid()), { comment: serverTimestamp(), commentId: postRef.id }, { merge: true });
+    await batch.commit().catch((e) => {
+      throw slowDown(e);
+    });
+    const parent = parentId ? ref('threads', threadId, 'posts', parentId) : ref('threads', threadId);
+    const to = (await getDoc(parent).catch(() => null))?.data()?.userId;
+    await notify(to, `reply_${postRef.id}`, { type: 'reply', targetId: threadId, ref: postRef.id, text: '', from: handle });
+    return threadFrom({ id: postRef.id, data: () => data });
+  }),
+  // `postId` null likes the thread itself.
+  setDiscussionLike: wrap(async (threadId, postId, on) => {
+    const target = postId ? ref('threads', threadId, 'posts', postId) : ref('threads', threadId);
+    await updateDoc(target, { likedBy: on ? arrayUnion(uid()) : arrayRemove(uid()) });
+    return { threadId, postId, liked: on };
+  }),
+  deleteThread: wrap(async (id) => {
+    await deleteDoc(ref('threads', id));
+  }),
+  deletePost: wrap(async (threadId, postId) => {
+    await deleteDoc(ref('threads', threadId, 'posts', postId));
+  }),
+
+  // ---- notifications ----
+  notifications: wrap(async (count = NOTIFICATIONS_SHOWN) => {
+    if (!auth.currentUser) return [];
+    const snap = await getDocs(
+      query(collection(db, 'users', uid(), 'notifications'), orderBy('createdAt', 'desc'), limit(count)),
+    );
+    return snap.docs.map((d) => ({
+      id: d.id,
+      type: text(d.data().type, 16),
+      from: text(d.data().from, 64),
+      targetId: text(d.data().targetId, 128),
+      text: text(d.data().text, 140),
+      read: d.data().read === true,
+      createdAt: ms(d.data().createdAt),
+    }));
+  }),
+  markNotificationsRead: wrap(async (ids) => {
+    const batch = writeBatch(db);
+    ids.forEach((id) => batch.update(ref('users', uid(), 'notifications', id), { read: true }));
+    await batch.commit();
+    return ids;
+  }),
+
+  // ---- search / bookmarks / reports ----
+  // Matches the START of circuit names (Firestore has no substring search), across every shared circuit.
+  searchGallery: wrap(async (q) => {
+    const needle = lowerAscii((q || '').trim());
+    if (!needle) return [];
+    const snap = await getDocs(
+      query(
+        collection(db, 'projects'),
+        where('approved', '==', true),
+        orderBy('nameLower'),
+        startAt(needle),
+        endAt(`${needle}\uf8ff`),
+        limit(SEARCH_SHOWN),
+      ),
+    );
+    const liked = await likedAmong(snap.docs.map((d) => d.id));
+    const samples = getSamples().filter((s) => lowerAscii(s.name).startsWith(needle));
+    return [...snap.docs.map((d) => galleryItem(projectFrom(d), liked)), ...samples];
+  }),
+  bookmarks: wrap(async () => {
+    if (!auth.currentUser) return [];
+    const ids = (await getDoc(ref('bookmarks', uid()))).data()?.ids;
+    return Array.isArray(ids) ? ids.filter((i) => typeof i === 'string') : [];
+  }),
+  setBookmark: wrap(async (id, on) => {
+    if (on && (await api.bookmarks()).length >= MAX_BOOKMARKS) {
+      throw fail(`You can save up to ${MAX_BOOKMARKS} circuits.`, 'limit_reached');
+    }
+    await setDoc(ref('bookmarks', uid()), { ids: on ? arrayUnion(id) : arrayRemove(id) }, { merge: true });
+    return { id, saved: on };
+  }),
+  // The saved circuits that are still shared, newest save first, plus the ids that are not (deleted, or back in
+  // review after an edit: the two look the same from here, so they are only removed when the user asks).
+  savedItems: wrap(async () => {
+    const ids = (await api.bookmarks()).reverse();
+    const real = ids.filter((id) => !isSampleId(id));
+    const found = new Map();
+    for (let i = 0; i < real.length; i += 30) {
+      const chunk = real.slice(i, i + 30);
+      const snap = await getDocs(
+        query(collection(db, 'projects'), where(documentId(), 'in', chunk), where('approved', '==', true), limit(30)),
+      );
+      const liked = await likedAmong(snap.docs.map((d) => d.id));
+      snap.docs.forEach((d) => found.set(d.id, galleryItem(projectFrom(d), liked)));
+    }
+    const items = ids.map((id) => (isSampleId(id) ? getSample(id) : found.get(id)));
+    return { items: items.filter(Boolean), missing: ids.filter((_, i) => !items[i]) };
+  }),
+  forgetBookmarks: wrap(async (ids) => {
+    await setDoc(ref('bookmarks', uid()), { ids: arrayRemove(...ids) }, { merge: true });
+  }),
+  // One report per user per circuit: the id is `<circuit>_<user>` and the rules refuse to overwrite it.
+  reportCircuit: wrap(async (projectId, reason) => {
+    const clean = (reason || '').trim();
+    if (!clean) throw fail('Say what is wrong with this circuit.', 'validation_error');
+    if (clean.length > 500) throw fail('Keep the report under 500 characters.', 'validation_error');
+    if (isSampleId(projectId)) throw fail('Sample circuits cannot be reported.', 'validation_error');
+    await requireVerified();
+    const reportId = `${projectId}_${uid()}`;
+    const reportRef = ref('reports', reportId);
+    if ((await getDoc(reportRef)).exists()) throw fail('You already reported this circuit.', 'conflict');
+    const batch = writeBatch(db);
+    batch.set(reportRef, { projectId, userId: uid(), reason: clean, createdAt: now() });
+    batch.set(ref('limits', uid()), { comment: serverTimestamp(), commentId: reportId }, { merge: true });
+    await batch.commit().catch((e) => {
+      throw slowDown(e);
+    });
+    return { projectId };
   }),
 
   // ---- follows ----

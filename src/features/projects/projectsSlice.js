@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { api } from '@/lib/api';
+import { buildTemplate } from '@/lib/templates';
 
 export const fetchProjects = createAsyncThunk('projects/fetch', async () => {
   const [items, folders] = await Promise.all([api.projects(), api.folders()]);
@@ -18,7 +19,22 @@ export const publishProject = createAsyncThunk('projects/publish', async ({ id, 
   api.publish(id, meta),
 );
 export const unpublishProject = createAsyncThunk('projects/unpublish', async (id) => api.unpublish(id));
-export const importProject = createAsyncThunk('projects/import', async (json) => api.importProject(JSON.parse(json)));
+const NOT_A_CIRCUIT = 'That file is not a Techomato circuit.';
+
+/** Imports an exported circuit (.json), or an Arduino sketch (.ino) onto a blank breadboard. */
+export const importProject = createAsyncThunk('projects/import', async ({ text, fileName = '' }) => {
+  if (/\.ino$/i.test(fileName)) {
+    if (text.length > 200000) throw new Error('That sketch is too long to import.');
+    return api.importProject({ ...buildTemplate('blank'), name: fileName.replace(/\.ino$/i, '').slice(0, 120), code: text });
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(NOT_A_CIRCUIT);
+  }
+  return api.importProject(data);
+});
 
 export const createFolder = createAsyncThunk('projects/createFolder', async (name) => api.createFolder(name));
 export const renameFolder = createAsyncThunk('projects/renameFolder', async ({ id, name }) => {

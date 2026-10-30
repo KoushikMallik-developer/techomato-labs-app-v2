@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import GalleryPage from './GalleryPage';
 
 vi.mock('@/lib/api', () => ({
-  api: { gallery: vi.fn(), like: vi.fn(), unlike: vi.fn() },
+  api: { gallery: vi.fn(), searchGallery: vi.fn(), like: vi.fn(), unlike: vi.fn() },
 }));
 
 const items = [
@@ -46,10 +46,35 @@ describe('GalleryPage', () => {
     api.gallery.mockResolvedValue({ items, cursor: null });
     renderGallery();
     await screen.findByText('Garage Sensor');
-    fireEvent.change(screen.getByPlaceholderText('Search Community Circuits…'), { target: { value: 'blink' } });
+    fireEvent.change(screen.getByLabelText('Search Community Circuits'), { target: { value: 'blink' } });
     await waitFor(() => expect(screen.queryByText('Garage Sensor')).not.toBeInTheDocument());
     expect(screen.getByText('Blink')).toBeInTheDocument();
     expect(api.gallery).toHaveBeenCalledTimes(1);
+  });
+
+  it('Enter searches every shared circuit by name on the server', async () => {
+    api.gallery.mockResolvedValue({ items, cursor: null });
+    api.searchGallery.mockResolvedValue([items[0]]);
+    renderGallery();
+    await screen.findByText('Garage Sensor');
+    const box = screen.getByLabelText('Search Community Circuits');
+    fireEvent.change(box, { target: { value: 'gar' } });
+    fireEvent.submit(box.closest('form'));
+    await waitFor(() => expect(api.searchGallery).toHaveBeenCalledWith('gar'));
+  });
+
+  it('emptying the box after a server search brings the normal pages back', async () => {
+    api.gallery.mockResolvedValue({ items, cursor: null });
+    api.searchGallery.mockResolvedValue([items[0]]);
+    renderGallery();
+    await screen.findByText('Blink');
+    const box = screen.getByLabelText('Search Community Circuits');
+    fireEvent.change(box, { target: { value: 'gar' } });
+    fireEvent.submit(box.closest('form'));
+    await waitFor(() => expect(screen.queryByText('Blink')).not.toBeInTheDocument());
+    fireEvent.change(box, { target: { value: '' } });
+    expect(await screen.findByText('Blink')).toBeInTheDocument();
+    expect(api.gallery).toHaveBeenCalledTimes(2);
   });
 
   it('re-sorts the loaded circuits without fetching again', async () => {

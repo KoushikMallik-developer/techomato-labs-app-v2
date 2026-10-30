@@ -95,6 +95,9 @@ export const TYPES = {
   transistor: { label: 'NPN transistor', pins: { E: [-10, 20], B: [0, 20], C: [10, 20] }, box: [-16, -16, 32, 40], props: {} },
   motor: { label: 'DC motor', pins: { '+': [-8, 22], '-': [8, 22] }, box: [-24, -26, 48, 52], props: {} },
   servo: { label: 'Servo motor', pins: { GND: [-10, 34], VCC: [0, 34], S: [10, 34] }, box: [-24, -28, 48, 64], props: {} },
+  joystick: { label: 'Joystick', pins: { VCC: [-20, 34], GND: [-10, 34], VRX: [0, 34], VRY: [10, 34], SW: [20, 34] }, box: [-30, -30, 60, 66], props: { x: 0.5, y: 0.5 } },
+  dht: { label: 'DHT11 temperature & humidity sensor', pins: { VCC: [-10, 26], DATA: [0, 26], GND: [10, 26] }, box: [-20, -30, 40, 76], props: { temp: 24, hum: 50 } },
+  neopixel: { label: 'NeoPixel strip (8 LEDs)', pins: { VCC: [-10, 22], DIN: [0, 22], GND: [10, 22] }, box: [-60, -14, 120, 38], props: {} },
   sevenseg: {
     label: '7-segment display',
     pins: { a: [-31.5, 44], b: [-22.5, 44], c: [-13.5, 44], d: [-4.5, 44], e: [4.5, 44], f: [13.5, 44], g: [22.5, 44], dp: [31.5, 44], COM: [0, -44] },
@@ -121,6 +124,9 @@ export const PIN_NAMES = {
   transistor: { E: 'emitter', B: 'base', C: 'collector' },
   motor: { '+': 'terminal +', '-': 'terminal −' },
   servo: { GND: 'GND', VCC: 'VCC', S: 'signal' },
+  joystick: { VCC: 'VCC (5V)', GND: 'GND', VRX: 'X axis (analog)', VRY: 'Y axis (analog)', SW: 'button (to GND when pressed)' },
+  dht: { VCC: 'VCC', DATA: 'data', GND: 'GND' },
+  neopixel: { VCC: '5V', DIN: 'data in', GND: 'GND' },
   sevenseg: { a: 'segment a', b: 'segment b', c: 'segment c', d: 'segment d', e: 'segment e', f: 'segment f', g: 'segment g', dp: 'decimal point', COM: 'common cathode (GND)' },
 };
 
@@ -143,6 +149,9 @@ export const ICONS = {
   transistor: '<svg viewBox="0 0 20 20"><path d="M4 16V9a6 6 0 0 1 12 0v7z" fill="#2a2d31"/><path d="M7 16v3M10 16v3M13 16v3" stroke="#9aa1aa" stroke-width="1.5"/></svg>',
   motor: '<svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="#4a4e54"/><circle cx="10" cy="10" r="3" fill="#c9ced4"/><rect x="9" y="0.5" width="2" height="3" fill="#9aa1aa"/></svg>',
   servo: '<svg viewBox="0 0 20 20"><rect x="3" y="6" width="14" height="11" rx="2" fill="#2456c9"/><rect x="7" y="1" width="6" height="6" rx="1" fill="#e3e6ea"/><rect x="1" y="3.5" width="10" height="1.8" rx="0.9" fill="#e3e6ea" transform="rotate(-20 6 4.5)"/></svg>',
+  joystick: '<svg viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" rx="3" fill="#1d1f22"/><circle cx="10" cy="10" r="5.5" fill="#3a3d42" stroke="#6b7078"/></svg>',
+  dht: '<svg viewBox="0 0 20 20"><rect x="4" y="2" width="12" height="16" rx="2" fill="#3aa0d8"/><path d="M6.5 6h7M6.5 9h7M6.5 12h7" stroke="#22709e" stroke-width="1.4"/></svg>',
+  neopixel: '<svg viewBox="0 0 20 20"><rect x="1" y="7" width="18" height="6" rx="1.5" fill="#111"/><rect x="2.5" y="8.5" width="3" height="3" fill="#ff3b30"/><rect x="8.5" y="8.5" width="3" height="3" fill="#30d158"/><rect x="14.5" y="8.5" width="3" height="3" fill="#2f8bff"/></svg>',
   sevenseg: '<svg viewBox="0 0 20 20"><rect x="3" y="2" width="14" height="16" rx="1.5" fill="#1d1f22"/><g stroke="#ff3b30" stroke-width="1.6" stroke-linecap="round"><path d="M7 5h6M7 10h6M7 15h6M6.5 5.5v4M13.5 5.5v4M6.5 10.5v4M13.5 10.5v4"/></g></svg>',
 };
 
@@ -153,8 +162,11 @@ export const PALETTE = [
   ['sonar', 'Ultrasonic sensor'],
   ['ldr', 'Photoresistor'],
   ['pir', 'Motion sensor'],
+  ['dht', 'Temp & humidity (DHT11)'],
+  ['joystick', 'Joystick'],
   ['led', 'LED'],
   ['rgbled', 'RGB LED'],
+  ['neopixel', 'NeoPixel strip'],
   ['resistor', 'Resistor'],
   ['diode', 'Diode'],
   ['capacitor', 'Capacitor'],

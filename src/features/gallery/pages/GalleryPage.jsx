@@ -1,9 +1,9 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import AppShell from '@/components/AppShell';
 import GalleryCard from '@/components/GalleryCard';
-import { fetchGallery, setQuery, setTag, setSort, toggleLike, selectGalleryState } from '../gallerySlice';
+import { fetchGallery, searchGallery, setQuery, setTag, setSort, toggleLike, selectGalleryState } from '../gallerySlice';
 import { selectIsSignedIn } from '@/features/auth/authSlice';
 import { TAGS } from '@/lib/templates';
 
@@ -25,6 +25,23 @@ export default function GalleryPage() {
     dispatch(fetchGallery());
   }, [dispatch, tag]);
 
+  // Typing filters what is loaded (free); Enter searches every shared circuit by name (one query).
+  const searched = useRef(false);
+  function onSearch(e) {
+    e.preventDefault();
+    searched.current = !!q.trim();
+    dispatch(q.trim() ? searchGallery(q) : fetchGallery());
+  }
+
+  function onType(value) {
+    dispatch(setQuery(value));
+    // Emptying the box after a server search must bring the normal pages back, not leave the results.
+    if (!value.trim() && searched.current) {
+      searched.current = false;
+      dispatch(fetchGallery());
+    }
+  }
+
   function onLike(id) {
     if (!isSignedIn) {
       navigate(`/login?next=${encodeURIComponent('/community')}`);
@@ -41,18 +58,19 @@ export default function GalleryPage() {
         </div>
       </div>
 
-      <div className="toolbar">
+      <form className="toolbar" onSubmit={onSearch} role="search">
         <input
           className="input"
-          placeholder="Search Community Circuits…"
+          placeholder="Search Community Circuits… (Enter searches all)"
+          aria-label="Search Community Circuits"
           value={q}
-          onChange={(e) => dispatch(setQuery(e.target.value))}
+          onChange={(e) => onType(e.target.value)}
         />
         <select className="input" value={sort} onChange={(e) => dispatch(setSort(e.target.value))}>
           <option value="popular">Most liked</option>
           <option value="new">Newest</option>
         </select>
-      </div>
+      </form>
 
       <div className="fchips" style={{ marginBottom: 20 }}>
         <button className={`fchip${!tag ? ' on' : ''}`} onClick={() => dispatch(setTag(''))}>

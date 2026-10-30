@@ -1,17 +1,25 @@
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { selectUser, logout } from '@/features/auth/authSlice';
+import { fetchNotifications, selectUnreadCount } from '@/features/notifications/notificationsSlice';
 import BrandMark from './BrandMark';
 
 const NAV_ITEMS = [
   { to: '/projects', label: 'Projects', icon: 'M3 7h7l2 2h9v10H3z' },
   { to: '/community', label: 'Community Circuits', icon: 'M4 5.5C4 4.7 4.7 4 5.5 4H11v16H5.5c-.8 0-1.5-.7-1.5-1.5zM13 4h5.5c.8 0 1.5.7 1.5 1.5v13c0 .8-.7 1.5-1.5 1.5H13z' },
+  { to: '/discussions', label: 'Discussions', icon: 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z' },
+  { to: '/saved', label: 'Saved', icon: 'M6 3h12v18l-6-4-6 4z' },
+  { to: '/notifications', label: 'Notifications', icon: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0' },
+  { to: '/lessons', label: 'Lessons', icon: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5' },
   {
     to: '/settings',
     label: 'Settings',
     icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.6 14H4a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6V4.5a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
   },
 ];
+
+const SIGNED_IN_ONLY = ['/projects', '/settings', '/saved', '/notifications'];
 
 function NavIcon({ d }) {
   return (
@@ -25,8 +33,21 @@ export default function AppShell({ title, children }) {
   const user = useSelector(selectUser);
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const initial = (user?.name || '?').trim().charAt(0).toUpperCase();
-  const items = user ? NAV_ITEMS : NAV_ITEMS.filter((item) => item.to !== '/projects' && item.to !== '/settings');
+  const unread = useSelector(selectUnreadCount);
+  const notifStatus = useSelector((s) => s.notifications.status);
+  useEffect(() => {
+    // The Notifications page loads its own, longer list.
+    if (user && notifStatus === 'idle' && pathname !== '/notifications') dispatch(fetchNotifications(10));
+  }, [dispatch, user, notifStatus, pathname]);
+  const badge = (item) =>
+    item.to === '/notifications' && unread > 0 ? (
+      <span className="badge" aria-label={`${unread} unread`}>
+        {unread > 9 ? '9+' : unread}
+      </span>
+    ) : null;
+  const items = user ? NAV_ITEMS : NAV_ITEMS.filter((item) => !SIGNED_IN_ONLY.includes(item.to));
 
   return (
     <div className="app">
@@ -44,6 +65,7 @@ export default function AppShell({ title, children }) {
             >
               <NavIcon d={item.icon} />
               {item.label}
+              {badge(item)}
             </NavLink>
           ))}
         </nav>
@@ -90,6 +112,7 @@ export default function AppShell({ title, children }) {
           <NavLink key={item.to} to={item.to} className={({ isActive }) => (isActive ? 'on' : '')}>
             <NavIcon d={item.icon} />
             {item.label}
+            {badge(item)}
           </NavLink>
         ))}
       </nav>

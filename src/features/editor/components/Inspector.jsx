@@ -86,6 +86,45 @@ export default function Inspector({ selection, parts, running }) {
         </>
       )}
 
+      {part.type === 'dht' && (
+        <>
+          <label className="editor-inspector-hint">
+            °C{' '}
+            <input
+              className="input"
+              type="number"
+              min="-40"
+              max="80"
+              step="0.5"
+              aria-label="Temperature in °C"
+              value={part.props.temp ?? 24}
+              style={{ width: 72, minHeight: 38, padding: '6px 8px' }}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v)) dispatch(setPartProp({ id: part.id, key: 'temp', value: Math.min(80, Math.max(-40, v)) }));
+              }}
+            />
+          </label>
+          <label className="editor-inspector-hint">
+            %{' '}
+            <input
+              className="input"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              aria-label="Humidity in %"
+              value={part.props.hum ?? 50}
+              style={{ width: 64, minHeight: 38, padding: '6px 8px' }}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v)) dispatch(setPartProp({ id: part.id, key: 'hum', value: Math.min(100, Math.max(0, v)) }));
+              }}
+            />
+          </label>
+        </>
+      )}
+
       {part.type === 'arduino' ? (
         <span className="editor-inspector-hint">Drag to move</span>
       ) : part.type === 'breadboard' ? (

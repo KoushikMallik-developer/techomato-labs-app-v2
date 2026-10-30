@@ -331,4 +331,19 @@ describe('editorSlice reducers', () => {
     store.dispatch(setActiveTab('serial'));
     expect(selectEditor(store.getState()).activeTab).toBe('serial');
   });
+
+  it('rotatePart leaves the Arduino and the breadboard as they are', () => {
+    const store = makeStore({
+      projectId: null, name: '', wires: [], code: '', saveState: 'saved', selection: null, pending: null, view: '2d',
+      running: false, sheetCollapsed: false, activeTab: 'code', status: 'ready', error: null,
+      parts: [
+        { id: 'ard', type: 'arduino', x: 0, y: 0, rot: 0, props: {} },
+        { id: 'bb', type: 'breadboard', x: 0, y: 0, rot: 0, props: {} },
+      ],
+    });
+    store.dispatch(rotatePart('ard'));
+    store.dispatch(rotatePart('bb'));
+    expect(store.getState().editor.parts.map((p) => p.rot)).toEqual([0, 0]);
+    expect(store.getState().editor.saveState).toBe('saved');
+  });
 });

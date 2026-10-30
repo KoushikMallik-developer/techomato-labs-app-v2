@@ -14,6 +14,12 @@ import ProjectsPage from '@/features/projects/pages/ProjectsPage';
 import GalleryPage from '@/features/gallery/pages/GalleryPage';
 import DetailPage from '@/features/gallery/pages/DetailPage';
 import SettingsPage from '@/features/settings/pages/SettingsPage';
+import LessonsPage from '@/features/lessons/pages/LessonsPage';
+import SavedPage from '@/features/gallery/pages/SavedPage';
+import ProfilePage from '@/features/gallery/pages/ProfilePage';
+import NotificationsPage from '@/features/notifications/pages/NotificationsPage';
+import DiscussionsPage from '@/features/discussions/pages/DiscussionsPage';
+import ThreadPage from '@/features/discussions/pages/ThreadPage';
 import NotFoundPage from '@/components/NotFoundPage';
 
 // The editor (simulator + 3D) and the admin pages are the heavy / rarely visited ones; load them on demand.
@@ -56,6 +62,26 @@ export default function AppRouter() {
           element={
             <RequireAuth>
               <ProjectsPage />
+            </RequireAuth>
+          }
+        />
+        <Route path="/lessons" element={<LessonsPage />} />
+        <Route path="/u/:handle" element={<ProfilePage />} />
+        <Route path="/discussions" element={<DiscussionsPage />} />
+        <Route path="/discussions/:id" element={<ThreadPage />} />
+        <Route
+          path="/notifications"
+          element={
+            <RequireAuth>
+              <NotificationsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/saved"
+          element={
+            <RequireAuth>
+              <SavedPage />
             </RequireAuth>
           }
         />

@@ -1,11 +1,12 @@
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
-import { renameProject, setView, setRunning, flushSave, revertToSaved } from '../editorSlice';
+import { renameProject, setView, setRunning, flushSave, revertToSaved, rotatePart } from '../editorSlice';
 import { openModal, showToast } from '@/features/ui/uiSlice';
 import { api } from '@/lib/api';
 import { primeAudio } from '../engine/audio';
 
-export default function Hud({ name, saveState, view, running, projectId, live, onAudioWarn }) {
+export default function Hud({ name, saveState, view, running, projectId, live, selection, onAudioWarn }) {
   const dispatch = useDispatch();
 
   async function onShare() {
@@ -61,6 +62,32 @@ export default function Hud({ name, saveState, view, running, projectId, live, o
     dispatch(setRunning(!running));
   }
 
+  // The listener is added once; it reads the latest handlers through this ref.
+  const keys = useRef();
+  keys.current = (e) => {
+    const dialogOpen = !!document.querySelector('.modal-back'); // then its buttons are the only controls
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 's') {
+      e.preventDefault(); // never the browser's "Save page"
+      return dialogOpen ? undefined : onSave();
+    }
+    if (dialogOpen) return;
+    if (mod && e.key === 'Enter') {
+      e.preventDefault();
+      return onToggleRun();
+    }
+    // Plain keys only outside text fields, so typing a sketch never triggers them.
+    if (mod || e.altKey || e.target.closest?.('textarea,select,input')) return;
+    if (e.key === '?') dispatch(openModal({ type: 'shortcuts', props: {} }));
+    else if (e.key === '2' || e.key === '3') dispatch(setView(`${e.key}d`));
+    else if (e.key.toLowerCase() === 'r' && !running && selection?.kind === 'part') dispatch(rotatePart(selection.id));
+  };
+  useEffect(() => {
+    const onKey = (e) => keys.current(e);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
   return (
     <header className="editor-hud glass">
       <Link to="/projects" className="icon-btn" aria-label="Back to your projects">
@@ -96,6 +123,14 @@ export default function Hud({ name, saveState, view, running, projectId, live, o
         </button>
         <button className="btn" onClick={onShare}>
           Share
+        </button>
+        <button
+          className="icon-btn"
+          aria-label="Keyboard shortcuts"
+          title="Keyboard shortcuts (?)"
+          onClick={() => dispatch(openModal({ type: 'shortcuts', props: {} }))}
+        >
+          ?
         </button>
         <button className={`btn run${running ? ' live' : ''}`} onClick={onToggleRun}>
           {running ? '■ Stop' : '▶ Run'}
