@@ -12,9 +12,12 @@ export const adminLogout = createAsyncThunk('admin/logout', async () => {
 
 export const fetchPending = createAsyncThunk('admin/fetchPending', async () => api.pendingCircuits());
 
-export const approveCircuit = createAsyncThunk('admin/approve', async (id, { dispatch }) => {
-  await api.approveCircuit(id);
-  await dispatch(fetchPending());
+export const approveCircuit = createAsyncThunk('admin/approve', async ({ id, seen }, { dispatch }) => {
+  try {
+    await api.approveCircuit(id, seen);
+  } finally {
+    await dispatch(fetchPending()); // also after a "changed since you opened it" refusal, so the new version shows
+  }
   return id;
 });
 
@@ -24,12 +27,23 @@ export const rejectCircuit = createAsyncThunk('admin/reject', async (id, { dispa
   return id;
 });
 
+/** `fetchUsers({ q })` loads the first page (or a search); `fetchUsers({ more: true })` appends the next page. */
+export const fetchUsers = createAsyncThunk('admin/fetchUsers', async ({ q = '', more } = {}, { getState }) =>
+  api.adminUsers({ q, after: more ? getState().admin.usersCursor : undefined }),
+);
+
+export const setUserDisabled = createAsyncThunk('admin/setUserDisabled', async ({ id, disabled }) =>
+  api.setUserDisabled(id, disabled),
+);
+
 const adminSlice = createSlice({
   name: 'admin',
   initialState: {
     isAdmin: false,
     initialized: false,
     pending: [],
+    users: [],
+    usersCursor: null, // createdAt of the last loaded user; null = no more pages
     status: 'idle', // idle | loading | failed
     error: null,
   },
@@ -65,6 +79,15 @@ const adminSlice = createSlice({
       })
       .addCase(fetchPending.fulfilled, (state, action) => {
         state.pending = action.payload;
+      })
+      .addCase(fetchUsers.fulfilled, (state, action) => {
+        const { users, cursor } = action.payload;
+        state.users = action.meta.arg?.more ? [...state.users, ...users] : users;
+        state.usersCursor = cursor;
+      })
+      .addCase(setUserDisabled.fulfilled, (state, action) => {
+        const user = state.users.find((u) => u.id === action.payload.id);
+        if (user) user.disabled = action.payload.disabled;
       });
   },
 });
@@ -77,3 +100,5 @@ export const selectAdminInitialized = (state) => state.admin.initialized;
 export const selectAdminStatus = (state) => state.admin.status;
 export const selectAdminError = (state) => state.admin.error;
 export const selectPendingCircuits = (state) => state.admin.pending;
+export const selectAdminUsers = (state) => state.admin.users;
+export const selectUsersCursor = (state) => state.admin.usersCursor;

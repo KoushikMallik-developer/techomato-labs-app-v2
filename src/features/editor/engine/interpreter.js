@@ -1,7 +1,8 @@
 /**
  * Arduino sketch runtime: a regex-based source-to-async-JS transpiler plus
  * the pinMode/digitalWrite/Serial/etc. API the transpiled sketch runs
- * against. Not a real C++ parser — sequential regex passes handle the
+ * against. The transpiled code runs in a sandboxed iframe (public/sandbox.html), because sketches
+ * come from other users; it reaches this page only through the allowlisted calls in `run` below. Not a real C++ parser — sequential regex passes handle the
  * subset of Arduino syntax the examples/templates use (typed declarations,
  * simple function defs, LiquidCrystal_I2C/Servo constructors) and turn
  * blocking calls (delay, pulseIn, user functions) into `await`-able async
@@ -116,9 +117,9 @@ export function transpile(src) {
   // 9. strip remaining bare casts like (int)x
   s = s.replace(/\((?:int|float|long|double)\)(?=\s*\w)/g, '');
 
-  // 10. await-prefix blocking calls (delay/delayMicroseconds/pulseIn) and user-defined
+  // 10. await-prefix calls that wait for the page (delay/pulseIn/analog+digitalRead) and user-defined
   // function *calls* only — must not match the function's own declaration line.
-  const awaitable = ['delay', 'delayMicroseconds', 'pulseIn', ...fns];
+  const awaitable = ['delay', 'delayMicroseconds', 'pulseIn', 'digitalRead', 'analogRead', ...fns];
   const awRe = new RegExp('(?<![.\\w])(?<!function\\s)(?<!await\\s)(' + awaitable.map(esc).join('|') + ')\\s*\\(', 'g');
   s = s.replace(awRe, 'await $1(');
 
@@ -216,45 +217,6 @@ function makeApi({ getDoc, log, resolve }, my) {
     }
     alive();
   }
-  async function delayMicroseconds(us) {
-    await delay(us / 1000);
-  }
-  function millis() {
-    return Math.round(performance.now() - sim.t0);
-  }
-  function micros() {
-    return Math.round((performance.now() - sim.t0) * 1000);
-  }
-  function map(x, a, b, c, d) {
-    return ((x - a) * (d - c)) / (b - a) + c;
-  }
-  function constrain(x, a, b) {
-    return Math.min(b, Math.max(a, x));
-  }
-  function random(a, b) {
-    if (b === undefined) {
-      b = a;
-      a = 0;
-    }
-    return a + Math.floor(Math.random() * (b - a));
-  }
-  function sq(x) {
-    return x * x;
-  }
-  function F(x) {
-    return x;
-  }
-  function __int(x) {
-    const n = Math.trunc(Number(x));
-    return Number.isFinite(n) ? n : 0;
-  }
-  let yieldCount = 0;
-  async function __y() {
-    alive();
-    yieldCount++;
-    if (yieldCount % 50 === 0) await sleep(0);
-  }
-
   const Serial = {
     begin() {},
     print(x) {
@@ -362,28 +324,46 @@ function makeApi({ getDoc, log, resolve }, my) {
   }
 
   return {
-    names: [
-      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'tone', 'noTone',
-      'delay', 'delayMicroseconds', 'millis', 'micros', 'map', 'constrain', 'random',
-      'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'F', 'Serial', 'pulseIn', '__lcd', '__servo', '__int', '__y',
-      'HIGH', 'LOW', 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 'LED_BUILTIN', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5',
-    ],
-    values: [
-      pinMode, digitalWrite, digitalRead, analogRead, analogWrite, tone, noTone,
-      delay, delayMicroseconds, millis, micros, map, constrain, random,
-      Math.abs, Math.min, Math.max, Math.pow, Math.sqrt, sq, F, Serial, pulseIn, __lcd, __servo, __int, __y,
-      1, 0, 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 13, 14, 15, 16, 17, 18, 19,
-    ],
+    // Math, timing and constants live in public/sandbox.html; only what touches the board is here.
+    names: ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'tone', 'noTone', 'Serial', 'pulseIn', '__lcd', '__servo'],
+    values: [pinMode, digitalWrite, digitalRead, analogRead, analogWrite, tone, noTone, Serial, pulseIn, __lcd, __servo],
   };
 }
+
+/** Default transport: a hidden sandboxed iframe with no access to this page's storage, cookies or login. */
+function iframeSpawn(onMessage) {
+  const frame = document.createElement('iframe');
+  frame.setAttribute('sandbox', 'allow-scripts');
+  frame.hidden = true;
+  frame.src = `${import.meta.env.BASE_URL}sandbox.html`;
+  const listen = (e) => {
+    if (e.source === frame.contentWindow) onMessage(e.data);
+  };
+  window.addEventListener('message', listen);
+  document.body.appendChild(frame);
+  return {
+    post: (m) => frame.contentWindow.postMessage(m, '*'),
+    kill() {
+      window.removeEventListener('message', listen);
+      frame.remove();
+    },
+  };
+}
+
+const RPC = ['pinMode', 'digitalWrite', 'analogWrite', 'tone', 'noTone', 'digitalRead', 'analogRead', 'pulseIn'];
+const REMOTE_OBJECTS = ['__lcd', '__servo'];
+// shortcut: a flat cap per second; raise it if a legitimate sketch ever trips it, or drop it once calls are batched.
+const MAX_CALLS_PER_SECOND = 2000; // each pin call re-solves the circuit (~1 ms), so far more than this saturates the page
 
 /**
  * Creates one interpreter bound to a board (via getDoc/serialWrite/requestRender
  * hooks). `run`/`stop` can be called repeatedly — each run gets a fresh
- * cancellation token so a previous run's dangling async chain can never
- * affect a new one, even across the shared `sim` singleton.
+ * cancellation token and a fresh sandbox, so a previous run can never affect a new one.
+ * `spawn(onMessage)` creates the sandbox; tests pass their own.
  */
-export function createInterpreter({ getDoc, serialWrite, requestRender }) {
+export function createInterpreter({ getDoc, serialWrite, requestRender, spawn = iframeSpawn }) {
+  let box = null;
+
   function log(msg) {
     serialWrite(msg + '\n');
   }
@@ -395,7 +375,13 @@ export function createInterpreter({ getDoc, serialWrite, requestRender }) {
     requestRender();
   }
 
-  async function run(code, { onStop } = {}) {
+  function endBox() {
+    box?.kill();
+    box = null;
+  }
+
+  function run(code, { onStop } = {}) {
+    endBox();
     sim.runId++;
     const my = sim.runId;
     resetSim();
@@ -415,47 +401,78 @@ export function createInterpreter({ getDoc, serialWrite, requestRender }) {
       sim.running = false;
       requestRender();
       onStop?.();
-      return;
+      return Promise.resolve();
     }
 
     const api = makeApi({ getDoc, log, resolve }, my);
-    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-    let prog;
-    try {
-      const factory = new AsyncFunction(...api.names, js);
-      prog = await factory(...api.values);
-    } catch (e) {
-      log('❌ ' + e.message);
-      sim.running = false;
-      requestRender();
-      onStop?.();
-      return;
-    }
+    const table = Object.fromEntries(api.names.map((n, i) => [n, api.values[i]]));
+    // Everything the sandboxed sketch may ask this page to do; anything else ends the run.
+    const rpc = {
+      ...Object.fromEntries(RPC.map((n) => [n, table[n]])),
+      'Serial.print': table.Serial.print,
+      'Serial.println': table.Serial.println,
+    };
+    const objects = new Map();
 
-    try {
-      await prog.setup();
-      for (;;) {
-        await prog.loop();
-        // Always yield a real macrotask between loop() calls — insertYields()
-        // only reaches user-written while/for/do bodies, so a loop() with no
-        // delay() and no inner loop (e.g. a blank sketch) would otherwise spin
-        // as a pure microtask chain forever, freezing the tab (and, as hit
-        // during testing, hanging the whole process).
-        if (sim.runId !== my) throw STOP;
-        await sleep(0);
+    return new Promise((done) => {
+      let ended = false;
+      let startTimer;
+      let windowStart = 0;
+      let calls = 0;
+      const mine = spawn(onMessage);
+      box = mine;
+
+      function finish(error) {
+        if (ended) return;
+        ended = true;
+        clearTimeout(startTimer);
+        mine.kill();
+        if (box === mine) box = null;
+        if (sim.runId === my) {
+          if (error) log('❌ ' + error);
+          sim.running = false;
+          requestRender();
+          onStop?.();
+        }
+        done();
       }
-    } catch (e) {
-      if (e !== STOP) log('❌ ' + e.message);
-    } finally {
-      if (sim.runId === my) {
-        sim.running = false;
-        requestRender();
-        onStop?.();
+
+      startTimer = setTimeout(() => finish('The sketch sandbox did not start.'), 5000);
+
+      async function onMessage(m) {
+        if (ended || sim.runId !== my || !m || typeof m !== 'object') return;
+        const now = performance.now();
+        if (now - windowStart > 1000) {
+          windowStart = now;
+          calls = 0;
+        }
+        if (++calls > MAX_CALLS_PER_SECOND) return finish('The sketch is making too many calls per second.');
+        const args = Array.isArray(m.args) ? m.args : [];
+        try {
+          if (m.t === 'ready') {
+            clearTimeout(startTimer);
+            mine.post({ t: 'run', js });
+          } else if (m.t === 'end') {
+            finish(m.error);
+          } else if (m.t === 'new' && REMOTE_OBJECTS.includes(m.kind)) {
+            objects.set(m.oid, table[m.kind]());
+          } else if (m.t === 'obj' && Object.hasOwn(objects.get(m.oid) ?? {}, m.method)) {
+            objects.get(m.oid)[m.method](...args);
+          } else if (m.t === 'call' && Object.hasOwn(rpc, m.fn)) {
+            const value = await rpc[m.fn](...args);
+            if (m.id) mine.post({ t: 'ret', id: m.id, value });
+          } else {
+            finish('Unsupported call: ' + String(m.fn ?? m.method ?? m.t));
+          }
+        } catch (e) {
+          if (e !== STOP) finish(e.message);
+        }
       }
-    }
+    });
   }
 
   function stop() {
+    endBox();
     sim.runId++;
     const doc = getDoc();
     for (const p of doc.parts) {

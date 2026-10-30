@@ -83,6 +83,13 @@ describe('editorSlice thunks', () => {
     expect(selectEditor(store.getState()).saveState).toBe('saved');
   });
 
+  it('flushSave does not write when nothing is unsaved', async () => {
+    const store = makeStore({ projectId: 'p-1', name: 'x', parts: [], wires: [], code: '', saveState: 'saved' });
+    const res = await store.dispatch(flushSave());
+    expect(res.payload).toBeNull();
+    expect(api.save).not.toHaveBeenCalled();
+  });
+
   it('flushSave is a no-op with nothing to save when there is no projectId', async () => {
     const store = makeStore();
     const res = await store.dispatch(flushSave());

@@ -1,0 +1,108 @@
+<!doctype html>
+<!-- Runs a sketch's transpiled JavaScript. Loaded in <iframe sandbox="allow-scripts"> (opaque origin: no
+     access to the app's storage, cookies or login) with a CSP that blocks all network. The sketch itself
+     runs in a Worker inside this page, so a loop that never yields can only freeze the Worker: the page
+     below notices the missing heartbeat and ends the run. The sketch reaches the app only through the
+     postMessage calls below, which the app checks against an allowlist. -->
+<meta charset="utf-8" />
+<script>
+// Runs inside the Worker. It is serialised with toString(), so it must not use anything from this page.
+function sketchWorker() {
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const t0 = performance.now();
+  let seq = 0;
+  const waiting = new Map();
+
+  const ask = (fn, args) => new Promise((res) => { const id = ++seq; waiting.set(id, res); postMessage({ t: 'call', id, fn, args }); });
+  const tell = (fn, args) => postMessage({ t: 'call', fn, args });
+  const remote = (kind, args) => {
+    const oid = ++seq;
+    postMessage({ t: 'new', oid, kind, args });
+    return new Proxy({}, { get: (_, method) => (...a) => postMessage({ t: 'obj', oid, method, args: a }) });
+  };
+
+  let yields = 0;
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const api = {
+    pinMode: (...a) => tell('pinMode', a),
+    digitalWrite: (...a) => tell('digitalWrite', a),
+    analogWrite: (...a) => tell('analogWrite', a),
+    tone: (...a) => tell('tone', a),
+    noTone: (...a) => tell('noTone', a),
+    digitalRead: (p) => ask('digitalRead', [p]),
+    analogRead: (p) => ask('analogRead', [p]),
+    pulseIn: (p, l, o) => ask('pulseIn', [p, l, o]),
+    delay: (ms) => sleep(Math.max(0, ms)),
+    delayMicroseconds: (us) => sleep(Math.max(0, us / 1000)),
+    millis: () => Math.round(performance.now() - t0),
+    micros: () => Math.round((performance.now() - t0) * 1000),
+    map: (x, a, b, c, d) => ((x - a) * (d - c)) / (b - a) + c,
+    constrain: clamp,
+    random: (a, b) => (b === undefined ? Math.floor(Math.random() * a) : a + Math.floor(Math.random() * (b - a))),
+    abs: Math.abs, min: Math.min, max: Math.max, pow: Math.pow, sqrt: Math.sqrt,
+    sq: (x) => x * x,
+    F: (x) => x,
+    Serial: { begin() {}, print: (x) => tell('Serial.print', [x]), println: (x) => tell('Serial.println', [x]) },
+    __lcd: (...a) => remote('__lcd', a),
+    __servo: () => {
+      const o = remote('__servo', []);
+      let angle = 90;
+      const self = {
+        attach: (p) => o.attach(p),
+        write: (a) => { angle = clamp(a, 0, 180); o.write(a); },
+        writeMicroseconds: (us) => self.write(Math.round(((us - 544) / (2400 - 544)) * 180)),
+        read: () => angle,
+      };
+      return self;
+    },
+    __int: (x) => { const n = Math.trunc(Number(x)); return Number.isFinite(n) ? n : 0; },
+    __y: async () => { if (++yields % 50 === 0) await sleep(0); },
+    HIGH: 1, LOW: 0, INPUT: 'INPUT', OUTPUT: 'OUTPUT', INPUT_PULLUP: 'INPUT_PULLUP', LED_BUILTIN: 13,
+    A0: 14, A1: 15, A2: 16, A3: 17, A4: 18, A5: 19,
+  };
+
+  // A Worker stuck in a synchronous loop cannot send this; the page watches for it.
+  setInterval(() => postMessage({ t: 'beat' }), 500);
+
+  addEventListener('message', async (e) => {
+    const m = e.data;
+    if (m.t === 'ret') {
+      waiting.get(m.id)?.(m.value);
+      waiting.delete(m.id);
+    } else if (m.t === 'run') {
+      try {
+        const prog = await new AsyncFunction(...Object.keys(api), m.js)(...Object.values(api));
+        await prog.setup();
+        for (;;) {
+          await prog.loop();
+          await sleep(0);
+        }
+      } catch (err) {
+        postMessage({ t: 'end', error: String((err && err.message) || err) });
+      }
+    }
+  });
+}
+
+(() => {
+  const worker = new Worker(URL.createObjectURL(new Blob(['(' + sketchWorker + ')()'])));
+  let lastBeat = Date.now();
+  const toApp = (m) => parent.postMessage(m, '*');
+
+  worker.onmessage = (e) => {
+    if (e.data.t === 'beat') lastBeat = Date.now();
+    else toApp(e.data);
+  };
+  addEventListener('message', (e) => {
+    if (e.source === parent) worker.postMessage(e.data);
+  });
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastBeat < 3000) return;
+    clearInterval(watchdog);
+    worker.terminate();
+    toApp({ t: 'end', error: 'The sketch is stuck in a loop that never waits. Add a delay() inside the loop.' });
+  }, 1000);
+  toApp({ t: 'ready' });
+})();
+</script>

@@ -39,7 +39,7 @@ export function authState(overrides = {}) {
 }
 
 export function adminState(overrides = {}) {
-  return { isAdmin: false, initialized: true, pending: [], status: 'idle', error: null, ...overrides };
+  return { isAdmin: false, initialized: true, pending: [], users: [], usersCursor: null, status: 'idle', error: null, ...overrides };
 }
 
 export function galleryState(overrides = {}) {

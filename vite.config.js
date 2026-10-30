@@ -12,6 +12,12 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'),
     },
   },
+  build: {
+    rollupOptions: {
+      // Firebase is big and changes rarely: its own file stays cached across deploys of app code.
+      output: { manualChunks: { firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/app-check'] } },
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,

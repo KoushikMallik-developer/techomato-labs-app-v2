@@ -12,7 +12,7 @@ export default function AuthorModal({ handle, close }) {
   const following = useSelector(selectIsFollowing(handle));
 
   useEffect(() => {
-    api.gallery({ author: handle }).then(setItems);
+    api.gallery({ author: handle }).then((r) => setItems(r.items));
   }, [handle]);
 
   useEffect(() => {

@@ -37,6 +37,14 @@ describe('TagsModal', () => {
     await waitFor(() => expect(api.save).toHaveBeenCalledWith('p-1', { tags: ['beginner'] }));
   });
 
+  it('does not write when the tags are unchanged, but still closes', () => {
+    const close = vi.fn();
+    renderWithProviders(<TagsModal project={{ id: 'p-1', tags: ['beginner'] }} close={close} />);
+    fireEvent.click(screen.getByText('Save tags'));
+    expect(api.save).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('calls close() on Cancel without saving', () => {
     const close = vi.fn();
     renderWithProviders(<TagsModal project={{ id: 'p-1', tags: [] }} close={close} />);

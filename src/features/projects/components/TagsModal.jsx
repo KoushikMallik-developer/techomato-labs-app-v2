@@ -17,7 +17,9 @@ export default function TagsModal({ project, close }) {
   }
 
   function onSave() {
-    dispatch(saveProject({ id: project.id, patch: { tags: [...tags] } }));
+    const before = project.tags || [];
+    const changed = tags.size !== before.length || before.some((t) => !tags.has(t));
+    if (changed) dispatch(saveProject({ id: project.id, patch: { tags: [...tags] } }));
     close();
   }
 
@@ -25,6 +27,9 @@ export default function TagsModal({ project, close }) {
     <>
       <h2>Edit tags</h2>
       <p>Helps people find this circuit in Community Circuits.</p>
+      {project.approved && (
+        <p className="small muted">This circuit is in Community Circuits. Changing tags sends it back for review.</p>
+      )}
       <div className="fchips" style={{ marginTop: 14 }}>
         {TAGS.map((t) => (
           <button

@@ -10,13 +10,13 @@ vi.mock('@/lib/api', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  api.gallery.mockResolvedValue([]);
+  api.gallery.mockResolvedValue({ items: [], cursor: null });
   api.following.mockResolvedValue([]);
 });
 
 describe('AuthorModal (signed out)', () => {
   it('shows the author\'s handle and their shared circuits, with no follow button', async () => {
-    api.gallery.mockResolvedValue([{ id: 'g-1', name: 'Blink' }]);
+    api.gallery.mockResolvedValue({ items: [{ id: 'g-1', name: 'Blink' }], cursor: null });
     renderWithProviders(<AuthorModal handle="ada_maker" close={() => {}} />);
     expect(screen.getByText('@ada_maker')).toBeInTheDocument();
     expect(await screen.findByText('Blink')).toHaveAttribute('href', '/community/g-1');
@@ -68,7 +68,7 @@ describe('AuthorModal (signed in)', () => {
   });
 
   it('closes when clicking a shared circuit link', async () => {
-    api.gallery.mockResolvedValue([{ id: 'g-1', name: 'Blink' }]);
+    api.gallery.mockResolvedValue({ items: [{ id: 'g-1', name: 'Blink' }], cursor: null });
     const close = vi.fn();
     renderWithProviders(<AuthorModal handle="ada_maker" close={close} />, { preloadedState });
     fireEvent.click(await screen.findByText('Blink'));

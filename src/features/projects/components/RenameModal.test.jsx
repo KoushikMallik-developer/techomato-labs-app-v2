@@ -30,6 +30,19 @@ describe('RenameModal', () => {
     await waitFor(() => expect(api.save).toHaveBeenCalledWith('p-1', { name: 'Renamed circuit' }));
   });
 
+  it('does not write when the name is unchanged (a save would send a live circuit back to review)', () => {
+    const close = vi.fn();
+    renderWithProviders(<RenameModal project={project} close={close} />);
+    fireEvent.click(screen.getByText('Save'));
+    expect(api.save).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns that renaming a live circuit sends it back for review', () => {
+    renderWithProviders(<RenameModal project={{ ...project, approved: true }} close={() => {}} />);
+    expect(screen.getByText(/sends it back for review/)).toBeInTheDocument();
+  });
+
   it('does not save a blank name, but still closes', () => {
     const close = vi.fn();
     renderWithProviders(<RenameModal project={project} close={close} />);

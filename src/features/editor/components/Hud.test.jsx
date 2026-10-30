@@ -62,6 +62,34 @@ describe('Hud', () => {
     await waitFor(() => expect(selectToast(store.getState()).message).toBe('Saved.'));
   });
 
+  it('does not claim "Saved." when the save failed', async () => {
+    api.save.mockRejectedValue(new Error('You are not allowed to do that.'));
+    const { store } = renderHud({ saveState: 'dirty' }, { editor: editorState({ projectId: 'p-1', saveState: 'dirty' }) });
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => expect(selectToast(store.getState()).message).toBe('You are not allowed to do that.'));
+  });
+
+  it('asks before saving a circuit that is live in Community Circuits', async () => {
+    api.save.mockResolvedValue({ id: 'p-1', approved: false });
+    const { store } = renderHud({ live: true, saveState: 'dirty' }, { editor: editorState({ projectId: 'p-1', saveState: 'dirty' }) });
+    fireEvent.click(screen.getByText('Save'));
+    expect(api.save).not.toHaveBeenCalled();
+    expect(selectModal(store.getState()).type).toBe('confirm');
+    await selectModal(store.getState()).props.onConfirm();
+    expect(api.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a live circuit alone when there is nothing to save (Save and Share do not resubmit it)', async () => {
+    api.project.mockResolvedValue({ id: 'p-1', name: 'My circuit', published: true, approved: true });
+    const { store } = renderHud({ live: true }, { editor: editorState({ projectId: 'p-1' }) });
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => expect(selectToast(store.getState()).message).toBe('Saved.'));
+    expect(selectModal(store.getState()).type).toBeNull();
+    fireEvent.click(screen.getByText('Share'));
+    await waitFor(() => expect(selectModal(store.getState()).type).toBe('publish'));
+    expect(api.save).not.toHaveBeenCalled();
+  });
+
   it('shares the project by fetching it fresh and opening the publish modal', async () => {
     api.save.mockResolvedValue({ id: 'p-1' });
     api.project.mockResolvedValue({ id: 'p-1', name: 'My circuit', published: false });

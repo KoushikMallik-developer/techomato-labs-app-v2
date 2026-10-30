@@ -4,7 +4,7 @@ import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '@/test-utils';
 import { api } from '@/lib/api';
 import DangerZonePanel from './DangerZonePanel';
-import { selectModal } from '@/features/ui/uiSlice';
+import { selectModal, selectToast } from '@/features/ui/uiSlice';
 
 vi.mock('@/lib/api', () => ({
   api: { logout: vi.fn(), deleteAccount: vi.fn() },
@@ -49,5 +49,14 @@ describe('DangerZonePanel', () => {
     await onConfirm();
     expect(api.deleteAccount).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('Landing page')).toBeInTheDocument();
+  });
+
+  it('stays on the page and says why when the deletion is refused', async () => {
+    api.deleteAccount.mockRejectedValue(new Error('For security, log out and back in, then try again.'));
+    const { store } = renderPanel();
+    fireEvent.click(screen.getByText('Delete account'));
+    await selectModal(store.getState()).props.onConfirm();
+    expect(selectToast(store.getState()).message).toBe('For security, log out and back in, then try again.');
+    expect(screen.queryByText('Landing page')).not.toBeInTheDocument();
   });
 });

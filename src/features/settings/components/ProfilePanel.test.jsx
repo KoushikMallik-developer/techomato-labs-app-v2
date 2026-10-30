@@ -39,7 +39,15 @@ describe('ProfilePanel', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: '  Ada Renamed  ' } });
     fireEvent.click(screen.getByText('Save'));
     await waitFor(() => expect(api.updateMe).toHaveBeenCalledWith({ name: 'Ada Renamed' }));
-    expect(selectToast(store.getState()).message).toBe('Profile updated.');
+    await waitFor(() => expect(selectToast(store.getState()).message).toBe('Profile updated.'));
+  });
+
+  it('shows the error, not "Profile updated.", when the save fails', async () => {
+    api.updateMe.mockRejectedValue(new Error('You are not allowed to do that.'));
+    const { store } = renderPanel(signedInUser({ name: 'Ada' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ada Renamed' } });
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => expect(selectToast(store.getState()).message).toBe('You are not allowed to do that.'));
   });
 
   it('falls back to the existing name if the field is cleared', async () => {

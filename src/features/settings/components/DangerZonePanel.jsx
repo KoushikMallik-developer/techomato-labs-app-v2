@@ -1,6 +1,6 @@
 import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { openModal } from '@/features/ui/uiSlice';
+import { openModal, showToast } from '@/features/ui/uiSlice';
 import { deleteAccount, logout } from '@/features/auth/authSlice';
 
 export default function DangerZonePanel() {
@@ -16,8 +16,10 @@ export default function DangerZonePanel() {
           body: 'This permanently deletes your account, projects, and folders. This cannot be undone.',
           confirmLabel: 'Delete account',
           onConfirm: async () => {
-            await dispatch(deleteAccount());
-            navigate('/');
+            const res = await dispatch(deleteAccount());
+            // Fails e.g. when the last login was more than a few minutes ago: say so, and stay signed in.
+            if (deleteAccount.fulfilled.match(res)) navigate('/');
+            else dispatch(showToast(res.error.message));
           },
         },
       }),

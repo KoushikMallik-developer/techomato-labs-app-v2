@@ -26,6 +26,13 @@ describe('ManageFoldersModal', () => {
     expect(screen.getByText('Sensors')).toBeInTheDocument();
   });
 
+  it('stops offering to add folders once the limit is reached', () => {
+    const folders = [1, 2, 3].map((n) => ({ id: `f-${n}`, name: `Folder ${n}` }));
+    renderWithProviders(<ManageFoldersModal close={() => {}} />, { preloadedState: { projects: projectsState({ folders }) } });
+    expect(screen.getByPlaceholderText('Up to 3 folders')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+  });
+
   it('creates a new folder and clears the input', async () => {
     api.createFolder.mockResolvedValue({ id: 'f-1', name: 'Wiring' });
     renderWithProviders(<ManageFoldersModal close={() => {}} />, { preloadedState: { projects: projectsState() } });

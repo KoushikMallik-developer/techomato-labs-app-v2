@@ -19,9 +19,11 @@ export default function PublishModal({ project, close }) {
   }
 
   async function onPublish() {
-    await dispatch(publishProject({ id: project.id, meta: { description, tags: [...tags] } }));
-    dispatch(showToast('Submitted for admin approval.'));
-    close();
+    const res = await dispatch(publishProject({ id: project.id, meta: { description, tags: [...tags] } }));
+    if (publishProject.fulfilled.match(res)) {
+      dispatch(showToast('Submitted for admin approval.'));
+      close();
+    }
   }
 
   async function onUnpublish() {

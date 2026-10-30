@@ -162,6 +162,7 @@ export default function EditorPage() {
           view={editor.view}
           running={editor.running}
           projectId={editor.projectId}
+          live={editor.approved}
           onAudioWarn={(msg) => writeSerial(msg + '\n')}
         />
         <PartsDock

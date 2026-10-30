@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderWithProviders, authState, signedInUser } from '@/test-utils';
 import { api } from '@/lib/api';
 import CommentForm from './CommentForm';
@@ -31,7 +31,18 @@ describe('CommentForm (signed in)', () => {
     fireEvent.change(input, { target: { value: '  Nice build  ' } });
     fireEvent.click(screen.getByText('Post'));
     expect(api.addComment).toHaveBeenCalledWith('g-1', 'Nice build');
-    expect(input).toHaveValue('');
+    await waitFor(() => expect(input).toHaveValue(''));
+  });
+
+  it('keeps what was typed when posting fails', async () => {
+    api.addComment.mockRejectedValue(new Error('Verify your email first.'));
+    renderWithProviders(<CommentForm itemId="g-1" />, { preloadedState });
+    const input = screen.getByPlaceholderText('Add a comment…');
+    fireEvent.change(input, { target: { value: 'Nice build' } });
+    fireEvent.click(screen.getByText('Post'));
+    await waitFor(() => expect(api.addComment).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(input).toHaveValue('Nice build');
   });
 
   it('does not submit a blank/whitespace-only comment', () => {
@@ -39,5 +50,13 @@ describe('CommentForm (signed in)', () => {
     fireEvent.change(screen.getByPlaceholderText('Add a comment…'), { target: { value: '   ' } });
     fireEvent.click(screen.getByText('Post'));
     expect(api.addComment).not.toHaveBeenCalled();
+  });
+
+  it('asks an unverified user to verify instead of showing the form', () => {
+    renderWithProviders(<CommentForm itemId="g-1" />, {
+      preloadedState: { auth: authState({ user: signedInUser({ verified: false }) }) },
+    });
+    expect(screen.getByText('Verify your email')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Add a comment…')).not.toBeInTheDocument();
   });
 });

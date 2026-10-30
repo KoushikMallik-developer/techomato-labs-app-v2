@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { createFolder, renameFolder, deleteFolder, selectProjectsState } from '../projectsSlice';
 import { openModal } from '@/features/ui/uiSlice';
+import { MAX_FOLDERS } from '@/lib/limits';
 
 export default function ManageFoldersModal({ close }) {
   const { folders } = useSelector(selectProjectsState);
   const dispatch = useDispatch();
+  const full = folders.length >= MAX_FOLDERS;
   const [newName, setNewName] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
@@ -47,12 +49,13 @@ export default function ManageFoldersModal({ close }) {
         <div className="field" style={{ flex: 1 }}>
           <input
             className="input"
-            placeholder="New folder name"
+            placeholder={full ? `Up to ${MAX_FOLDERS} folders` : 'New folder name'}
+            disabled={full}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
           />
         </div>
-        <button className="btn primary" type="submit">
+        <button className="btn primary" type="submit" disabled={full}>
           Add
         </button>
       </form>

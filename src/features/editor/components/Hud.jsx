@@ -5,7 +5,7 @@ import { openModal, showToast } from '@/features/ui/uiSlice';
 import { api } from '@/lib/api';
 import { primeAudio } from '../engine/audio';
 
-export default function Hud({ name, saveState, view, running, projectId, onAudioWarn }) {
+export default function Hud({ name, saveState, view, running, projectId, live, onAudioWarn }) {
   const dispatch = useDispatch();
 
   async function onShare() {
@@ -14,9 +14,25 @@ export default function Hud({ name, saveState, view, running, projectId, onAudio
     if (project) dispatch(openModal({ type: 'publish', props: { project } }));
   }
 
-  async function onSave() {
-    await dispatch(flushSave());
-    dispatch(showToast('Saved.'));
+  async function save() {
+    const res = await dispatch(flushSave());
+    dispatch(showToast(flushSave.fulfilled.match(res) ? 'Saved.' : res.error.message));
+  }
+
+  // Only the owner can edit a circuit; saving a live one sends it back for review, so ask first.
+  function onSave() {
+    if (!live || saveState !== 'dirty') return save();
+    dispatch(
+      openModal({
+        type: 'confirm',
+        props: {
+          title: 'Save changes to a shared circuit?',
+          body: 'Saving sends this circuit back to an admin for review. It leaves Community Circuits until it is approved again.',
+          confirmLabel: 'Save and resubmit',
+          onConfirm: save,
+        },
+      }),
+    );
   }
 
   function onReset() {

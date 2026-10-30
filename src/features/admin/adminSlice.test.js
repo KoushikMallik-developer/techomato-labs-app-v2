@@ -6,6 +6,8 @@ import adminReducer, {
   adminLogin,
   adminLogout,
   fetchPending,
+  fetchUsers,
+  setUserDisabled,
   approveCircuit,
   rejectCircuit,
   clearAdminError,
@@ -14,6 +16,7 @@ import adminReducer, {
   selectAdminStatus,
   selectAdminError,
   selectPendingCircuits,
+  selectAdminUsers,
 } from './adminSlice';
 
 vi.mock('@/lib/api', () => ({
@@ -24,6 +27,8 @@ vi.mock('@/lib/api', () => ({
     pendingCircuits: vi.fn(),
     approveCircuit: vi.fn(),
     rejectCircuit: vi.fn(),
+    adminUsers: vi.fn(),
+    setUserDisabled: vi.fn(),
   },
 }));
 
@@ -105,8 +110,8 @@ describe('adminSlice', () => {
     const store = makeStore();
     await store.dispatch(fetchPending());
     expect(selectPendingCircuits(store.getState())).toHaveLength(2);
-    await store.dispatch(approveCircuit('p-1'));
-    expect(api.approveCircuit).toHaveBeenCalledWith('p-1');
+    await store.dispatch(approveCircuit({ id: 'p-1', seen: 123 }));
+    expect(api.approveCircuit).toHaveBeenCalledWith('p-1', 123);
     expect(selectPendingCircuits(store.getState())).toEqual([{ id: 'p-2' }]);
   });
 
@@ -127,5 +132,29 @@ describe('adminSlice', () => {
     expect(selectAdminError(store.getState())).toBe('nope');
     store.dispatch(clearAdminError());
     expect(selectAdminError(store.getState())).toBeNull();
+  });
+
+  it('fetchUsers stores the list and setUserDisabled flips one user in it', async () => {
+    api.adminUsers.mockResolvedValue({
+      users: [{ id: 'u1', handle: 'ada', disabled: false }, { id: 'u2', handle: 'bob', disabled: false }],
+      cursor: null,
+    });
+    api.setUserDisabled.mockResolvedValue({ id: 'u2', disabled: true });
+    const store = makeStore();
+    await store.dispatch(fetchUsers());
+    await store.dispatch(setUserDisabled({ id: 'u2', disabled: true }));
+    expect(api.setUserDisabled).toHaveBeenCalledWith('u2', true);
+    expect(selectAdminUsers(store.getState()).map((u) => u.disabled)).toEqual([false, true]);
+  });
+
+  it('fetchUsers({ more: true }) appends the next page using the saved cursor', async () => {
+    api.adminUsers.mockResolvedValueOnce({ users: [{ id: 'u1' }], cursor: 500 });
+    api.adminUsers.mockResolvedValueOnce({ users: [{ id: 'u2' }], cursor: null });
+    const store = makeStore();
+    await store.dispatch(fetchUsers());
+    await store.dispatch(fetchUsers({ more: true }));
+    expect(api.adminUsers).toHaveBeenLastCalledWith({ q: '', after: 500 });
+    expect(selectAdminUsers(store.getState()).map((u) => u.id)).toEqual(['u1', 'u2']);
+    expect(store.getState().admin.usersCursor).toBeNull();
   });
 });

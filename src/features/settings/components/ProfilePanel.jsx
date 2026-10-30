@@ -11,14 +11,15 @@ export default function ProfilePanel() {
   const dispatch = useDispatch();
   const [name, setName] = useState(user?.name || '');
 
-  function saveName(e) {
+  async function saveName(e) {
     e.preventDefault();
-    dispatch(updateProfile({ name: name.trim() || user.name }));
-    dispatch(showToast('Profile updated.'));
+    const res = await dispatch(updateProfile({ name: name.trim() || user.name }));
+    dispatch(showToast(updateProfile.fulfilled.match(res) ? 'Profile updated.' : res.error.message));
   }
 
-  function pickAvatar(a) {
-    dispatch(updateProfile({ avatar: a }));
+  async function pickAvatar(a) {
+    const res = await dispatch(updateProfile({ avatar: a }));
+    if (!updateProfile.fulfilled.match(res)) dispatch(showToast(res.error.message));
   }
 
   return (

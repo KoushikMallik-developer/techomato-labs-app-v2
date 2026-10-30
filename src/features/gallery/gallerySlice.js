@@ -1,9 +1,10 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { api } from '@/lib/api';
 
-export const fetchGallery = createAsyncThunk('gallery/fetch', async (_, { getState }) => {
-  const { q, tag, sort } = getState().gallery;
-  return api.gallery({ q, tag, sort });
+/** `fetchGallery()` loads the first page; `fetchGallery(true)` appends the next one. */
+export const fetchGallery = createAsyncThunk('gallery/fetch', async (more, { getState }) => {
+  const { tag, cursor } = getState().gallery;
+  return api.gallery({ tag, after: more ? cursor : undefined });
 });
 
 /** The backend's like endpoint is idempotent PUT (like) / DELETE (unlike) and
@@ -52,6 +53,7 @@ const gallerySlice = createSlice({
   name: 'gallery',
   initialState: {
     items: [],
+    cursor: null, // publishedAt of the last loaded circuit; null = no more pages
     status: 'idle',
     q: '',
     tag: '',
@@ -78,7 +80,10 @@ const gallerySlice = createSlice({
       })
       .addCase(fetchGallery.fulfilled, (state, action) => {
         state.status = 'idle';
-        state.items = action.payload;
+        const { items, cursor } = action.payload;
+        const known = new Set(state.items.map((i) => i.id));
+        state.items = action.meta.arg ? [...state.items, ...items.filter((i) => !known.has(i.id))] : items;
+        state.cursor = cursor;
       })
       .addCase(toggleLike.fulfilled, (state, action) => {
         const { id, liked, likeCount } = action.payload;

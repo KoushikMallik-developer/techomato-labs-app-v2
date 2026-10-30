@@ -21,7 +21,8 @@ export const loadProject = createAsyncThunk('editor/load', async (id) => {
 
 export const flushSave = createAsyncThunk('editor/flushSave', async (_, { getState }) => {
   const s = getState().editor;
-  if (!s.projectId) return null;
+  // Nothing unsaved: don't write, or a live circuit would be sent back to review for no reason.
+  if (!s.projectId || s.saveState === 'saved') return null;
   return api.save(s.projectId, { name: s.name, parts: s.parts, wires: s.wires, code: s.code });
 });
 
@@ -48,6 +49,7 @@ const initialState = {
   activeTab: 'code', // 'code' | 'serial'
   status: 'idle', // idle | loading | ready | error
   saveState: 'saved', // saved | saving | dirty
+  approved: false, // live in Community Circuits: a save sends it back to review
   error: null,
 };
 
@@ -180,6 +182,7 @@ const editorSlice = createSlice({
         state.parts = p.parts;
         state.wires = p.wires;
         state.code = p.code;
+        state.approved = !!p.approved;
         state.selection = null;
         state.pending = null;
         state.running = false;
@@ -203,8 +206,9 @@ const editorSlice = createSlice({
       .addCase(flushSave.pending, (state) => {
         if (state.saveState === 'dirty') state.saveState = 'saving';
       })
-      .addCase(flushSave.fulfilled, (state) => {
+      .addCase(flushSave.fulfilled, (state, action) => {
         state.saveState = 'saved';
+        if (action.payload) state.approved = !!action.payload.approved;
       });
   },
 });

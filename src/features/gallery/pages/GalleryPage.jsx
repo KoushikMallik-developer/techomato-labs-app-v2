@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import AppShell from '@/components/AppShell';
@@ -11,11 +11,19 @@ export default function GalleryPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const isSignedIn = useSelector(selectIsSignedIn);
-  const { items: visible, q, tag, sort, status } = useSelector(selectGalleryState);
+  const { items: loaded, q, tag, sort, status, cursor } = useSelector(selectGalleryState);
+
+  // Search and sort work on what is already loaded, so typing never costs Firestore reads.
+  const visible = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return loaded
+      .filter((p) => !needle || `${p.name} ${p.description} ${p.tags.join(' ')}`.toLowerCase().includes(needle))
+      .sort((a, b) => (sort === 'new' ? 0 : b.likeCount - a.likeCount) || b.publishedAt - a.publishedAt);
+  }, [loaded, q, sort]);
 
   useEffect(() => {
     dispatch(fetchGallery());
-  }, [dispatch, q, tag, sort]);
+  }, [dispatch, tag]);
 
   function onLike(id) {
     if (!isSignedIn) {
@@ -78,6 +86,11 @@ export default function GalleryPage() {
             <GalleryCard key={item.id} item={item} liked={item.liked} onLike={onLike} />
           ))}
         </div>
+      )}
+      {cursor != null && (
+        <button className="btn" disabled={status === 'loading'} onClick={() => dispatch(fetchGallery(true))}>
+          Load more
+        </button>
       )}
     </AppShell>
   );

@@ -9,41 +9,94 @@ service cloud.firestore {
     function isOwner(ownerId) { return signedIn() && request.auth.uid == ownerId; }
     // Admins are accounts with a hand-created `admins/{uid}` document (console or Admin SDK only).
     function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+    // A disabled account (an admin-made disabledUsers/{uid} document) can read but not write anything.
+    function active() { return !exists(/databases/$(database)/documents/disabledUsers/$(request.auth.uid)); }
     function changed(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
 
     match /admins/{uid} {
       allow get: if isOwner(uid);
     }
 
+    // disabledUsers/{uid} -> { at }: set by an admin from the admin panel. The user can read their own, so the app
+    // can sign them out with a clear message; admins cannot be disabled.
+    match /disabledUsers/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin() && request.query.limit <= 200;
+      allow create: if isAdmin() && !exists(/databases/$(database)/documents/admins/$(uid))
+        && request.resource.data.keys().hasOnly(['at']) && request.resource.data.at is number;
+      allow delete: if isAdmin();
+    }
+
     // handles/{handle} -> { uid }: reserves a unique public @handle; never changes once created.
+    // A handle is `<name>_<tail of the owner's uid>`, so nobody can claim a name like `techomato`.
     match /handles/{handle} {
-      allow create: if signedIn() && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid
+        && handle.matches('^[a-z0-9]{1,16}_[a-z0-9]{4,}$')
+        && request.auth.uid.lower().matches('.*' + handle.split('_')[1] + '$')
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.handle == handle;
       allow delete: if isOwner(resource.data.uid);
+    }
+
+    // limits/{uid}: last-write times that throttle spam. Each content create must stamp request.time
+    // and its own doc id in the same batch (see getAfter below); the stamp only moves forward after
+    // the cooldown, and the id means one stamp pays for exactly one document.
+    match /limits/{uid} {
+      allow get: if isOwner(uid);
+      function touched() { return resource == null ? request.resource.data.keys().toSet() : request.resource.data.diff(resource.data).affectedKeys(); }
+      function stamp(f, secs) {
+        return request.resource.data[f] == request.time
+          && (resource == null || !(f in resource.data) || request.time > resource.data[f] + duration.value(secs, 's'));
+      }
+      // projectCount = circuits the user owns (max 5). It only moves +1 together with a new circuit's
+      // stamp, or -1 together with the deletion of one of their circuits (removedId), so it cannot be faked.
+      function count() { return resource == null ? 0 : resource.data.get('projectCount', 0); }
+      function adds() {
+        return request.resource.data.projectCount == count() + 1 && request.resource.data.projectCount <= 5
+          && touched().hasAny(['projectId']);
+      }
+      function drops() {
+        return request.resource.data.projectCount == count() - 1 && touched().hasAny(['removedId'])
+          && exists(/databases/$(database)/documents/projects/$(request.resource.data.removedId))
+          && !existsAfter(/databases/$(database)/documents/projects/$(request.resource.data.removedId))
+          && get(/databases/$(database)/documents/projects/$(request.resource.data.removedId)).data.ownerId == uid;
+      }
+      allow create, update: if isOwner(uid) && active()
+        && request.resource.data.keys().hasOnly(['comment', 'commentId', 'project', 'projectId', 'projectCount', 'removedId'])
+        && (!touched().hasAny(['comment', 'commentId']) || (stamp('comment', 10) && request.resource.data.commentId is string
+          && request.auth.token.email_verified == true))
+        && (!touched().hasAny(['project', 'projectId']) || (stamp('project', 30) && request.resource.data.projectId is string && adds()))
+        && (!touched().hasAny(['removedId']) || drops())
+        && (!touched().hasAny(['projectCount']) || adds() || drops());
     }
 
     match /users/{uid} {
       function validName(n) { return n is string && n.size() >= 1 && n.size() <= 120; }
-      allow get: if isOwner(uid);
+      allow get: if isOwner(uid) || isAdmin();
+      // The admin panel lists the newest users to disable or enable them (names and handles only).
+      allow list: if isAdmin() && request.query.limit <= 100;
       allow create: if isOwner(uid)
-        && request.resource.data.keys().hasOnly(['name', 'handle', 'avatar', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['name', 'nameLower', 'handle', 'avatar', 'createdAt', 'email'])
+        && request.resource.data.keys().hasAll(['name', 'nameLower', 'handle', 'avatar', 'createdAt', 'email'])
+        // The admin panel lists users by createdAt: a missing or non-numeric one would hide the account from it.
+        && request.resource.data.createdAt is number
+        && request.resource.data.createdAt <= request.time.toMillis() + 600000
         && validName(request.resource.data.name)
+        // name/email are kept lowercase so the admin panel can search them; the email must be the login's own.
+        && request.resource.data.nameLower == request.resource.data.name.lower()
+        && request.resource.data.get('email', '') in ['', request.auth.token.get('email', '').lower()]
         && request.resource.data.avatar == ''
         && request.resource.data.handle.matches('^[a-z0-9_]{1,64}$')
         && getAfter(/databases/$(database)/documents/handles/$(request.resource.data.handle)).data.uid == uid;
-      allow update: if isOwner(uid) && changed(['name', 'avatar'])
+      allow update: if isOwner(uid) && active() && changed(['name', 'nameLower', 'avatar'])
         && validName(request.resource.data.name)
+        && request.resource.data.nameLower == request.resource.data.name.lower()
         && request.resource.data.avatar is string && request.resource.data.avatar.size() <= 32;
       allow delete: if isOwner(uid);
-
-      match /following/{handle} {
-        allow read, delete: if isOwner(uid);
-        allow create: if isOwner(uid) && handle.matches('^[A-Za-z0-9_]{1,64}$');
-      }
 
       // users/{uid}/likes/{projectId}: may only change together with the project's likeCount (see projects rule).
       match /likes/{projectId} {
         allow read: if isOwner(uid);
-        allow create: if isOwner(uid)
+        allow create: if isOwner(uid) && active()
           && get(/databases/$(database)/documents/projects/$(projectId)).data.approved == true
           && getAfter(/databases/$(database)/documents/projects/$(projectId)).data.likeCount
              == get(/databases/$(database)/documents/projects/$(projectId)).data.likeCount + 1;
@@ -53,13 +106,22 @@ service cloud.firestore {
       }
     }
 
+    // follows/{uid} -> { handles: [...] }: who the user follows, at most 500 (one read for the whole list).
+    match /follows/{uid} {
+      allow get, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid) && active() && request.resource.data.keys().hasOnly(['handles'])
+        && request.resource.data.handles is list && request.resource.data.handles.size() <= 500;
+    }
+
+    // A user's folders can only have the ids `<uid>_1`, `_2`, `_3`, which caps them at three.
     match /folders/{id} {
       function validFolder(d) { return d.name is string && d.name.size() >= 1 && d.name.size() <= 80; }
       allow read: if isOwner(resource.data.ownerId);
-      allow create: if isOwner(request.resource.data.ownerId)
+      allow create: if isOwner(request.resource.data.ownerId) && active()
+        && id in [request.auth.uid + '_1', request.auth.uid + '_2', request.auth.uid + '_3']
         && request.resource.data.keys().hasOnly(['ownerId', 'name', 'createdAt'])
         && validFolder(request.resource.data);
-      allow update: if isOwner(resource.data.ownerId) && changed(['name']) && validFolder(request.resource.data);
+      allow update: if isOwner(resource.data.ownerId) && active() && changed(['name']) && validFolder(request.resource.data);
       allow delete: if isOwner(resource.data.ownerId);
     }
 
@@ -70,33 +132,47 @@ service cloud.firestore {
           && d.tags is list && d.tags.size() <= 10
           && d.parts is string && d.parts.size() <= 400000
           && d.wires is string && d.wires.size() <= 400000
-          && d.code is string && d.code.size() <= 200000;
+          && d.code is string && d.code.size() <= 200000
+          // Sharing needs a verified email (the starter circuit made at signup is not shared, so it passes).
+          && (d.published != true || request.auth.token.email_verified == true)
+          // The gallery pages by publishedAt, so it must be a real number that is not in the future.
+          && (d.publishedAt == null || (d.publishedAt is number && d.publishedAt <= request.time.toMillis() + 600000));
       }
 
       // Everyone sees approved circuits; owners see their own; admins see the review queue.
-      allow get, list: if resource.data.approved == true || isOwner(resource.data.ownerId) || isAdmin();
+      function visible() { return resource.data.approved == true || isOwner(resource.data.ownerId) || isAdmin(); }
+      allow get: if visible();
+      // A list must carry a limit: unbounded public reads of 1 MB documents are a cheap way to run up the bill.
+      allow list: if visible() && request.query.limit <= 100;
 
       allow create: if isOwner(request.resource.data.ownerId)
         && request.resource.data.approved == false
         && request.resource.data.seed == false
         && request.resource.data.likeCount == 0
+        && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.project == request.time
+        && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.projectId == id
         && request.resource.data.author == getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.handle
         && validProject(request.resource.data);
 
       allow update:
-        // owner: can never approve, forge likes, or change authorship
-        if (isOwner(resource.data.ownerId)
+        // owner: can never approve, forge likes, or change authorship; editing an approved circuit
+        // must send it back to review (approved == false), only moving it between folders is free
+        if (isOwner(resource.data.ownerId) && active()
               && request.resource.data.ownerId == resource.data.ownerId
               && request.resource.data.author == resource.data.author
               && request.resource.data.likeCount == resource.data.likeCount
               && request.resource.data.seed == resource.data.seed
-              && (request.resource.data.approved == resource.data.approved || request.resource.data.approved == false)
+              // Every owner write stamps a fresh server time, so an admin's approval can be pinned to the
+              // exact version they reviewed (see approveCircuit in api.js).
+              && request.resource.data.updatedAt == request.time
+              && (request.resource.data.approved == false
+                    || (resource.data.approved == true && changed(['folder', 'updatedAt'])))
               && validProject(request.resource.data))
         // admin: approve / reject submitted circuits
         || (isAdmin() && resource.data.published == true
-              && changed(['approved', 'approvedAt', 'published', 'updatedAt']))
+              && changed(['approved', 'approvedAt', 'published']))
         // anyone signed in: +1 / -1 on likeCount, only alongside their own like marker
-        || (signedIn() && resource.data.approved == true && changed(['likeCount'])
+        || (signedIn() && active() && resource.data.approved == true && changed(['likeCount'])
               && ((request.resource.data.likeCount == resource.data.likeCount + 1
                     && !exists(/databases/$(database)/documents/users/$(request.auth.uid)/likes/$(id))
                     && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/likes/$(id)))
@@ -108,13 +184,20 @@ service cloud.firestore {
 
       match /comments/{commentId} {
         function projectApproved() { return get(/databases/$(database)/documents/projects/$(id)).data.approved == true; }
-        allow read: if projectApproved() || isAdmin();
+        allow get: if projectApproved() || isAdmin();
+        // Unbounded comment reads would let a few accounts burn the whole daily read quota with one page view.
+        allow list: if (projectApproved() || isAdmin()) && request.query.limit <= 100;
         allow create: if signedIn() && projectApproved()
+          && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.comment == request.time
+          && getAfter(/databases/$(database)/documents/limits/$(request.auth.uid)).data.commentId == commentId
           && request.resource.data.keys().hasOnly(['userId', 'name', 'text', 'createdAt'])
           && request.resource.data.userId == request.auth.uid
           && request.resource.data.name == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
           && request.resource.data.text is string
-          && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 2000;
+          && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 2000
+          // Lists show the newest comments by createdAt; a string or far-future value would sit on top forever.
+          && request.resource.data.createdAt is number
+          && request.resource.data.createdAt <= request.time.toMillis() + 600000;
         allow delete: if isOwner(resource.data.userId) || isAdmin();
       }
     }

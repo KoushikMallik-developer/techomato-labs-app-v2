@@ -84,6 +84,19 @@ describe('ProjectMenuModal — duplicate', () => {
   });
 });
 
+describe('ProjectMenuModal — duplicate failing', () => {
+  it('does not claim success or close when the duplicate is refused', async () => {
+    api.duplicate.mockRejectedValue(new Error('You can keep up to 5 circuits.'));
+    const close = vi.fn();
+    const { store } = renderModal(project, close);
+    fireEvent.click(screen.getByText('Duplicate'));
+    await waitFor(() => expect(api.duplicate).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(selectToast(store.getState()).message).not.toBe('Project duplicated.');
+    expect(close).not.toHaveBeenCalled();
+  });
+});
+
 describe('ProjectMenuModal — export', () => {
   let createObjectURL;
   let revokeObjectURL;

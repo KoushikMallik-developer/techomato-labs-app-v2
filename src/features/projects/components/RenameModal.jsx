@@ -8,13 +8,17 @@ export default function RenameModal({ project, close }) {
 
   function onSubmit(e) {
     e.preventDefault();
-    if (name.trim()) dispatch(saveProject({ id: project.id, patch: { name: name.trim() } }));
+    const clean = name.trim();
+    if (clean && clean !== project.name) dispatch(saveProject({ id: project.id, patch: { name: clean } }));
     close();
   }
 
   return (
     <form onSubmit={onSubmit}>
       <h2>Rename project</h2>
+      {project.approved && (
+        <p className="small muted">This circuit is in Community Circuits. Renaming sends it back for review.</p>
+      )}
       <div className="field">
         <label htmlFor="rename-input">Name</label>
         <input

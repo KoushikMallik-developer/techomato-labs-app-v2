@@ -26,9 +26,11 @@ export default function ProjectMenuModal({ project, close }) {
   }
 
   async function duplicate() {
-    await dispatch(duplicateProject(project.id));
-    dispatch(showToast('Project duplicated.'));
-    close();
+    const res = await dispatch(duplicateProject(project.id));
+    if (duplicateProject.fulfilled.match(res)) {
+      dispatch(showToast('Project duplicated.'));
+      close();
+    }
   }
 
   async function exportJson() {

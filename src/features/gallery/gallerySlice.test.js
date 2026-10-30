@@ -43,19 +43,31 @@ beforeEach(() => {
 });
 
 describe('gallerySlice', () => {
-  it('fetchGallery.fulfilled sends the current q/tag/sort and stores the results', async () => {
-    api.gallery.mockResolvedValue([{ id: 'g-1', liked: false, likeCount: 3 }]);
+  it('fetchGallery.fulfilled sends the current tag and stores the results', async () => {
+    api.gallery.mockResolvedValue({ items: [{ id: 'g-1', liked: false, likeCount: 3 }], cursor: null });
     const store = makeStore();
     store.dispatch(setQuery('sensor'));
     store.dispatch(setTag('sensors'));
     store.dispatch(setSort('new'));
     await store.dispatch(fetchGallery());
-    expect(api.gallery).toHaveBeenCalledWith({ q: 'sensor', tag: 'sensors', sort: 'new' });
+    expect(api.gallery).toHaveBeenCalledWith({ tag: 'sensors', after: undefined });
     expect(selectGalleryState(store.getState()).items).toEqual([{ id: 'g-1', liked: false, likeCount: 3 }]);
   });
 
+  it('fetchGallery(true) appends the next page using the saved cursor', async () => {
+    api.gallery.mockResolvedValueOnce({ items: [{ id: 'g-1' }], cursor: 50 });
+    api.gallery.mockResolvedValueOnce({ items: [{ id: 'g-1' }, { id: 'g-2' }], cursor: null });
+    const store = makeStore();
+    await store.dispatch(fetchGallery());
+    await store.dispatch(fetchGallery(true));
+    expect(api.gallery).toHaveBeenLastCalledWith(expect.objectContaining({ after: 50 }));
+    const { items, cursor } = selectGalleryState(store.getState());
+    expect(items.map((i) => i.id)).toEqual(['g-1', 'g-2']);
+    expect(cursor).toBeNull();
+  });
+
   it('toggleLike calls the like endpoint when the item is not yet liked, and patches the item in place', async () => {
-    api.gallery.mockResolvedValue([{ id: 'g-1', liked: false, likeCount: 3 }]);
+    api.gallery.mockResolvedValue({ items: [{ id: 'g-1', liked: false, likeCount: 3 }], cursor: null });
     api.like.mockResolvedValue({ liked: true, likeCount: 4 });
     const store = makeStore();
     await store.dispatch(fetchGallery());
@@ -68,7 +80,7 @@ describe('gallerySlice', () => {
   });
 
   it('toggleLike calls the unlike endpoint when the item is already liked', async () => {
-    api.gallery.mockResolvedValue([{ id: 'g-1', liked: true, likeCount: 4 }]);
+    api.gallery.mockResolvedValue({ items: [{ id: 'g-1', liked: true, likeCount: 4 }], cursor: null });
     api.unlike.mockResolvedValue({ liked: false, likeCount: 3 });
     const store = makeStore();
     await store.dispatch(fetchGallery());
