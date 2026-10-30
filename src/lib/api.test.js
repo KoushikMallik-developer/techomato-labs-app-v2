@@ -109,6 +109,26 @@ describe('comments (a thread must not cost unbounded reads)', () => {
   });
 });
 
+describe('built-in sample circuits by @dev', () => {
+  it('close the gallery on its last page, and respect the tag and author filters', async () => {
+    const { getDocs } = await import('firebase/firestore');
+    getDocs.mockResolvedValue({ docs: [], size: 0 });
+    const all = await api.gallery({});
+    expect(all.items).toHaveLength(6);
+    expect(all.items.every((i) => i.author === 'dev' && i.parts.length > 0)).toBe(true);
+    expect((await api.gallery({ tag: 'servo' })).items.map((i) => i.id)).toEqual(['sample-servoseg']);
+    expect((await api.gallery({ author: 'someone_else' })).items).toEqual([]);
+  });
+
+  it('show on the detail page, but cannot be liked or commented on', async () => {
+    expect((await api.item('sample-blink')).name).toBe('My First Blink');
+    expect(await api.item('sample-nope')).toBeNull();
+    expect(await api.comments('sample-blink')).toEqual([]);
+    await expect(api.like('sample-blink')).rejects.toThrow(/cannot be liked/);
+    await expect(api.addComment('sample-blink', 'hi')).rejects.toThrow(/closed/);
+  });
+});
+
 describe('me() after verifying on another device', () => {
   it('re-checks an unverified user with Firebase and refreshes the token', async () => {
     const user = {

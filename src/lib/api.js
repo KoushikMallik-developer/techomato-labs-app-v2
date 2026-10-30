@@ -51,6 +51,7 @@ import { auth, db } from '@/lib/firebase';
 import { sanitizeCircuit } from '@/lib/sanitizeCircuit';
 import { MAX_FOLDERS, MAX_FOLLOWS, MAX_PROJECTS } from '@/lib/limits';
 import { buildTemplate } from '@/lib/templates';
+import { getSamples, getSample, isSampleId, SAMPLE_AUTHOR } from '@/lib/samples';
 
 const MAX_TAGS = 10;
 const TAG_RE = /^[a-z0-9][a-z0-9 _-]{0,31}$/;
@@ -336,6 +337,13 @@ async function likedAmong(ids) {
   return new Set(snap.docs.map((d) => d.id));
 }
 
+/** Whether a built-in sample passes the gallery's tag / author / Following filters. */
+function matchesSample(sample, { tag, author }, followed) {
+  if (author && author !== SAMPLE_AUTHOR) return false;
+  if (tag === FOLLOWING_FILTER) return followed.includes(SAMPLE_AUTHOR);
+  return !tag || sample.tags.includes(tag.toLowerCase());
+}
+
 function galleryItem({ approved: _a, approvedAt: _b, published: _c, folder: _d, ...p }, liked) {
   return { ...p, liked: liked.has(p.id) };
 }
@@ -343,6 +351,7 @@ function galleryItem({ approved: _a, approvedAt: _b, published: _c, folder: _d, 
 /** Idempotent like/unlike. The like marker and the counter change in one transaction, and the
  * rules only accept a counter change that matches a marker change, so counts cannot be forged. */
 async function setLike(id, wanted) {
+  if (isSampleId(id)) throw fail('Sample circuits cannot be liked.', 'validation_error');
   const projectRef = ref('projects', id);
   const likeRef = ref('users', uid(), 'likes', id);
   return runTransaction(db, async (tx) => {
@@ -722,9 +731,13 @@ export const api = {
       .map((d) => galleryItem(projectFrom(d), liked))
       .filter((p) => tag !== FOLLOWING_FILTER || handles.includes(p.author));
     // A full page means there may be more; the cursor is the last raw doc, not the last filtered one.
-    return { items, cursor: snap.size === GALLERY_PAGE ? snap.docs.at(-1).data().publishedAt : null };
+    const cursor = snap.size === GALLERY_PAGE ? snap.docs.at(-1).data().publishedAt : null;
+    // The built-in samples close the list, so they show on the last page only.
+    if (cursor === null) items.push(...getSamples().filter((s) => matchesSample(s, { tag, author }, handles)));
+    return { items, cursor };
   }),
   item: wrap(async (id) => {
+    if (isSampleId(id)) return getSample(id) ?? null;
     try {
       const snap = await getDoc(ref('projects', id));
       if (!snap.exists() || !snap.data().approved) return null;
@@ -736,12 +749,14 @@ export const api = {
   like: wrap((id) => setLike(id, true)),
   unlike: wrap((id) => setLike(id, false)),
   remix: wrap(async (id) => {
+    if (isSampleId(id)) return addProject({ ...getSample(id), name: `${getSample(id).name} (remix)` });
     const snap = await getDoc(ref('projects', id));
     if (!snap.exists() || !snap.data().approved) throw fail('Circuit not found.', 'not_found');
     const source = projectFrom(snap);
     return addProject({ ...source, name: `${source.name} (remix)` });
   }),
   comments: wrap(async (itemId) => {
+    if (isSampleId(itemId)) return [];
     // shortcut: only the newest COMMENTS_SHOWN show (and cost reads); add "Load more" if a thread needs more.
     const snap = await getDocs(
       query(collection(db, 'projects', itemId, 'comments'), orderBy('createdAt', 'desc'), limit(COMMENTS_SHOWN)),
@@ -754,6 +769,7 @@ export const api = {
     const clean = (text || '').trim();
     if (!clean) throw fail('Write something first.', 'validation_error');
     if (clean.length > 2000) throw fail('Comments can be up to 2000 characters.', 'validation_error');
+    if (isSampleId(itemId)) throw fail('Comments are closed on sample circuits.', 'validation_error');
     await requireVerified();
     const { name } = await profile();
     const data = { userId: uid(), name, text: clean, createdAt: now() };
