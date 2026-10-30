@@ -1,0 +1,127 @@
+rules_version = '2';
+
+// The browser talks to Firestore directly, so these rules ARE the backend's security.
+// Deploy with: firebase deploy --only firestore
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function db() { return /databases/$(database)/documents; }
+    function signedIn() { return request.auth != null; }
+    function isOwner(ownerId) { return signedIn() && request.auth.uid == ownerId; }
+    // Admins are accounts with a hand-created `admins/{uid}` document (console or Admin SDK only).
+    function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+    function changed(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+
+    match /admins/{uid} {
+      allow get: if isOwner(uid);
+    }
+
+    // handles/{handle} -> { uid }: reserves a unique public @handle; never changes once created.
+    match /handles/{handle} {
+      allow create: if signedIn() && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid;
+      allow delete: if isOwner(resource.data.uid);
+    }
+
+    match /users/{uid} {
+      function validName(n) { return n is string && n.size() >= 1 && n.size() <= 120; }
+      allow get: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['name', 'handle', 'avatar', 'createdAt'])
+        && validName(request.resource.data.name)
+        && request.resource.data.avatar == ''
+        && request.resource.data.handle.matches('^[a-z0-9_]{1,64}$')
+        && getAfter(/databases/$(database)/documents/handles/$(request.resource.data.handle)).data.uid == uid;
+      allow update: if isOwner(uid) && changed(['name', 'avatar'])
+        && validName(request.resource.data.name)
+        && request.resource.data.avatar is string && request.resource.data.avatar.size() <= 32;
+      allow delete: if isOwner(uid);
+
+      match /following/{handle} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && handle.matches('^[A-Za-z0-9_]{1,64}$');
+      }
+
+      // users/{uid}/likes/{projectId}: may only change together with the project's likeCount (see projects rule).
+      match /likes/{projectId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && get(/databases/$(database)/documents/projects/$(projectId)).data.approved == true
+          && getAfter(/databases/$(database)/documents/projects/$(projectId)).data.likeCount
+             == get(/databases/$(database)/documents/projects/$(projectId)).data.likeCount + 1;
+        allow delete: if isOwner(uid)
+          && getAfter(/databases/$(database)/documents/projects/$(projectId)).data.likeCount
+             == get(/databases/$(database)/documents/projects/$(projectId)).data.likeCount - 1;
+      }
+    }
+
+    match /folders/{id} {
+      function validFolder(d) { return d.name is string && d.name.size() >= 1 && d.name.size() <= 80; }
+      allow read: if isOwner(resource.data.ownerId);
+      allow create: if isOwner(request.resource.data.ownerId)
+        && request.resource.data.keys().hasOnly(['ownerId', 'name', 'createdAt'])
+        && validFolder(request.resource.data);
+      allow update: if isOwner(resource.data.ownerId) && changed(['name']) && validFolder(request.resource.data);
+      allow delete: if isOwner(resource.data.ownerId);
+    }
+
+    match /projects/{id} {
+      function validProject(d) {
+        return d.name is string && d.name.size() >= 1 && d.name.size() <= 120
+          && d.description is string && d.description.size() <= 2000
+          && d.tags is list && d.tags.size() <= 10
+          && d.parts is string && d.parts.size() <= 400000
+          && d.wires is string && d.wires.size() <= 400000
+          && d.code is string && d.code.size() <= 200000;
+      }
+
+      // Everyone sees approved circuits; owners see their own; admins see the review queue.
+      allow get, list: if resource.data.approved == true || isOwner(resource.data.ownerId) || isAdmin();
+
+      allow create: if isOwner(request.resource.data.ownerId)
+        && request.resource.data.approved == false
+        && request.resource.data.seed == false
+        && request.resource.data.likeCount == 0
+        && request.resource.data.author == getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.handle
+        && validProject(request.resource.data);
+
+      allow update:
+        // owner: can never approve, forge likes, or change authorship
+        if (isOwner(resource.data.ownerId)
+              && request.resource.data.ownerId == resource.data.ownerId
+              && request.resource.data.author == resource.data.author
+              && request.resource.data.likeCount == resource.data.likeCount
+              && request.resource.data.seed == resource.data.seed
+              && (request.resource.data.approved == resource.data.approved || request.resource.data.approved == false)
+              && validProject(request.resource.data))
+        // admin: approve / reject submitted circuits
+        || (isAdmin() && resource.data.published == true
+              && changed(['approved', 'approvedAt', 'published', 'updatedAt']))
+        // anyone signed in: +1 / -1 on likeCount, only alongside their own like marker
+        || (signedIn() && resource.data.approved == true && changed(['likeCount'])
+              && ((request.resource.data.likeCount == resource.data.likeCount + 1
+                    && !exists(/databases/$(database)/documents/users/$(request.auth.uid)/likes/$(id))
+                    && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/likes/$(id)))
+                  || (request.resource.data.likeCount == resource.data.likeCount - 1
+                    && exists(/databases/$(database)/documents/users/$(request.auth.uid)/likes/$(id))
+                    && !existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/likes/$(id)))));
+
+      allow delete: if isOwner(resource.data.ownerId) || isAdmin();
+
+      match /comments/{commentId} {
+        function projectApproved() { return get(/databases/$(database)/documents/projects/$(id)).data.approved == true; }
+        allow read: if projectApproved() || isAdmin();
+        allow create: if signedIn() && projectApproved()
+          && request.resource.data.keys().hasOnly(['userId', 'name', 'text', 'createdAt'])
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.name == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 2000;
+        allow delete: if isOwner(resource.data.userId) || isAdmin();
+      }
+    }
+
+    // Lets a signed-in user find their own comments across all circuits (account deletion).
+    match /{path=**}/comments/{commentId} {
+      allow list: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}

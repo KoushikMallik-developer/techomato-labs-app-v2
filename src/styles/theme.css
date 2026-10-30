@@ -1,0 +1,91 @@
+:root {
+  /* page chrome — swaps with light/dark mode below */
+  --bg: #f5f2ec;
+  --text: #17181c;
+  --muted: #5b5f6a;
+  --edge: #e4dfd5;
+  --edge-hi: #17181c;
+  --glass: rgba(255, 255, 255, 0.92);
+  --glass-strong: #ffffff;
+  --accent: #c8381f;
+  --accent-ink: #ffffff;
+  --accent-soft: #fbe6e0;
+  --violet: #8e2413;
+  --stop: #e11d48;
+  --ok: #1f7a45;
+  --shadow: 0 20px 40px -18px rgba(23, 24, 28, 0.28);
+
+  /* the circuit canvas + code surfaces are always dark, independent of page theme —
+     same treatment the reference UI gives its own code windows on a light page. */
+  --panel: #17181c;
+  --panel-2: #22242a;
+  --panel-line: #2a2c33;
+  --panel-text: #e7e8ec;
+  --panel-muted: #9ca0ab;
+  --leaf: #2f5d3a;
+  --canvas: var(--panel);
+  --canvas-ink: var(--panel-text);
+  --grid: rgba(255, 255, 255, 0.05);
+  --grid-major: rgba(255, 255, 255, 0.13);
+  --code-bg: var(--panel-2);
+  --code-ink: var(--panel-text);
+  --serial-bg: #0f1013;
+  --serial-ink: #8fe3a0;
+
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --body: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --sheet-h: 44%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #141417;
+    --text: #f1efea;
+    --muted: #a3a6af;
+    --edge: #2c2e35;
+    --edge-hi: #f1efea;
+    --glass: rgba(34, 36, 42, 0.92);
+    --glass-strong: #1c1d22;
+    --accent: #d9482e;
+    --accent-ink: #ffffff;
+    --accent-soft: #3a1e18;
+    --violet: #f2b8a8;
+    --stop: #ff4d6d;
+    --ok: #4ade80;
+    --shadow: 0 20px 44px -18px rgba(0, 0, 0, 0.6);
+    --panel: #0f1013;
+    --panel-2: #1a1b20;
+    --panel-line: #26282e;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #141417;
+  --text: #f1efea;
+  --muted: #a3a6af;
+  --edge: #2c2e35;
+  --edge-hi: #f1efea;
+  --glass: rgba(34, 36, 42, 0.92);
+  --glass-strong: #1c1d22;
+  --accent: #d9482e;
+  --accent-ink: #ffffff;
+  --accent-soft: #3a1e18;
+  --violet: #f2b8a8;
+  --stop: #ff4d6d;
+  --ok: #4ade80;
+  --shadow: 0 20px 44px -18px rgba(0, 0, 0, 0.6);
+  --panel: #0f1013;
+  --panel-2: #1a1b20;
+  --panel-line: #26282e;
+}
+
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--edge);
+  box-shadow: var(--shadow);
+}
