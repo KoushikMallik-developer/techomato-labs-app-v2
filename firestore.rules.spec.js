@@ -326,6 +326,18 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('firestore.rules', () => {
     await assertFails(getCountFromServer(all(alice2)));
   });
 
+  it('lets an admin count new users, shared circuits and discussions per period, with a limit', async () => {
+    const admin = env.authenticatedContext('adminxyz0000').firestore();
+    const nobody = env.authenticatedContext('gabexyz5555').firestore();
+    const since = (db, col, field, cap) =>
+      query(collection(db, col), where(field, '>=', 0), where(field, '<', 9e15), limit(cap));
+    await assertSucceeds(getCountFromServer(since(admin, 'users', 'createdAt', 100)));
+    await assertSucceeds(getCountFromServer(since(admin, 'projects', 'publishedAt', 100)));
+    await assertSucceeds(getCountFromServer(since(admin, 'threads', 'createdAt', 50)));
+    await assertFails(getCountFromServer(since(nobody, 'users', 'createdAt', 100)));
+    await assertFails(getCountFromServer(query(collection(admin, 'users'), where('createdAt', '>=', 0)))); // limit required
+  });
+
   it('gives each user only three folder slots', async () => {
     const folder = { ownerId: 'alicexyz1234', name: 'Sensors', createdAt: 1 };
     await assertSucceeds(setDoc(doc(alice, 'folders', 'alicexyz1234_3'), folder));

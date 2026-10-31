@@ -52,6 +52,7 @@ vi.mock('firebase/firestore', () => ({
   increment: vi.fn((n) => ['increment', n]),
 }));
 
+import { where } from 'firebase/firestore';
 import { api, projectFrom } from './api';
 
 beforeEach(() => {
@@ -172,6 +173,26 @@ describe('save', () => {
   it('refuses a bad tag instead of saving it', async () => {
     await expect(api.save('p1', { tags: ['no way!'] })).rejects.toMatchObject({ code: 'validation_error' });
     expect(fb.updateDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe('adminActivity (one count per time bucket)', () => {
+  it.each([
+    ['24h', 24],
+    ['7d', 7],
+    ['30d', 30],
+  ])('%s gives %i contiguous buckets that end after now', async (range, n) => {
+    const res = await api.adminActivity(range);
+    expect(res.edges).toHaveLength(n + 1);
+    expect([res.users, res.circuits, res.posts].map((s) => s.length)).toEqual([n, n, n]);
+    expect(res.edges.every((e, i) => i === 0 || e > res.edges[i - 1])).toBe(true);
+    expect(res.edges[n - 1]).toBeLessThanOrEqual(Date.now());
+    expect(res.edges[n]).toBeGreaterThan(Date.now());
+    if (range !== '24h') expect(res.edges.slice(1).every((e, i) => (e - res.edges[i]) / 36e5 >= 23 && (e - res.edges[i]) / 36e5 <= 25)).toBe(true); // a day is 23 to 25 hours across a DST change
+    // the users series asks for exactly [edge i, edge i+1)
+    const usersRanges = where.mock.calls.slice(0, n * 2);
+    expect(usersRanges.filter((c) => c[1] === '>=').map((c) => c[2])).toEqual(res.edges.slice(0, -1));
+    expect(usersRanges.filter((c) => c[1] === '<').map((c) => c[2])).toEqual(res.edges.slice(1));
   });
 });
 

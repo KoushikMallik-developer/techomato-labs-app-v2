@@ -102,7 +102,9 @@ wired up, and the circuit editor has a complete 2D drag-and-wire board, MNA circ
    Before deploying rule changes, run `npm run test:rules` (needs a recent JDK, 21 or newer, for the Firestore emulator).
 5. **Admin**: create a normal account in Authentication, then add a document `admins/<that user's uid>` (any fields)
    in the Firestore console. Rules forbid clients from writing `admins`. Log in at `/admin`.
-   The admin panel lists pending circuits and users (newest first, 20 at a time; search matches the *start* of a name, email
+   The admin panel has four tabs: **Overview** (counts, plus charts of new users, circuits shared to Community and discussion
+   posts per hour for a day or per day for 7 or 30 days; each bar counts at most 100, posts 50, shown as "100+"), **Review queue**,
+   **Reports** (grouped by circuit or discussion; the newest 50 are loaded) and **Users**, which lists users (newest first, 20 at a time; search matches the *start* of a name, email
    or handle; each row shows circuit counts, and the Community count opens that user's published circuits); **Disable** blocks a user from writing anything (the
    rules check a `disabledUsers/<uid>` document) and signs them out at their next login, **Enable** undoes it. This is
    not Firebase's own "disable user" switch, which needs a server (Admin SDK).

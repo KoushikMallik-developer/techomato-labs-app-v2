@@ -49,7 +49,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { sanitizeCircuit } from '@/lib/sanitizeCircuit';
-import { MAX_BOOKMARKS, MAX_FOLDERS, MAX_FOLLOWS, MAX_PROJECTS } from '@/lib/limits';
+import { MAX_BOOKMARKS, MAX_FOLDERS, MAX_FOLLOWS, MAX_PROJECTS, REPORTS_SHOWN } from '@/lib/limits';
 import { buildTemplate } from '@/lib/templates';
 import { getSamples, getSample, isSampleId, SAMPLE_AUTHOR } from '@/lib/samples';
 
@@ -63,7 +63,6 @@ const GALLERY_PAGE = 10;
 const COMMENTS_SHOWN = 50;
 const USERS_PAGE = 20;
 const SEARCH_SHOWN = 24;
-const REPORTS_SHOWN = 50;
 const THREADS_PAGE = 15;
 const POSTS_SHOWN = 100; // the rules' list limit for a thread's posts
 const NOTIFICATIONS_SHOWN = 30;
@@ -629,6 +628,35 @@ export const api = {
     return snap.docs
       .map(projectFrom)
       .map(({ id, name, tags, likeCount, publishedAt }) => ({ id, name, tags, likeCount, publishedAt }));
+  }),
+  // New users, shared circuits and discussion posts per hour (24h) or per day (7d, 30d), as count queries: about one read each.
+  // shortcut: the rules cap every list at 100 (posts 50), so a busy bucket tops out there; raise it with a count-only rule.
+  adminActivity: wrap(async (range) => {
+    const hourly = range === '24h';
+    const buckets = hourly ? 24 : range === '30d' ? 30 : 7;
+    const d = new Date();
+    if (hourly) {
+      d.setMinutes(0, 0, 0);
+      d.setHours(d.getHours() + 1);
+    } else {
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() + 1);
+    }
+    const edges = [];
+    for (let i = 0; i <= buckets; i++) {
+      edges.unshift(d.getTime());
+      if (hourly) d.setHours(d.getHours() - 1);
+      else d.setDate(d.getDate() - 1); // by calendar, so a daylight-saving day is not an hour off
+    }
+    const series = (col, cap, field = 'createdAt') =>
+      Promise.all(
+        edges.slice(0, -1).map(async (from, i) => {
+          const q = query(collection(db, col), where(field, '>=', from), where(field, '<', edges[i + 1]), limit(cap));
+          return (await getCountFromServer(q)).data().count;
+        }),
+      );
+    const [users, circuits, posts] = await Promise.all([series('users', 100), series('projects', 100, 'publishedAt'), series('threads', 50)]);
+    return { edges, users, circuits, posts, caps: { users: 100, circuits: 100, posts: 50 } };
   }),
   setUserDisabled: wrap(async (id, disabled) => {
     if (disabled) await setDoc(ref('disabledUsers', id), { at: now() });

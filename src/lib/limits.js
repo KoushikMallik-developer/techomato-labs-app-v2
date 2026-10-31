@@ -4,3 +4,5 @@ export const MAX_PROJECTS = 5;
 export const MAX_FOLDERS = 3;
 export const MAX_FOLLOWS = 500;
 export const MAX_BOOKMARKS = 200;
+// The admin panel loads this many of the newest reports; more are there but not shown.
+export const REPORTS_SHOWN = 50;

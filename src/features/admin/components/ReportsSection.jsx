@@ -1,30 +1,27 @@
-import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { api } from '@/lib/api';
+import { REPORTS_SHOWN } from '@/lib/limits';
 import { openModal, showToast } from '@/features/ui/uiSlice';
-import { rejectCircuit } from '../adminSlice';
+import { dismissReport, rejectCircuit, selectAdminLoaded, selectAdminReports } from '../adminSlice';
+import { timeAgo } from '../timeAgo';
 
-/** Circuits users reported. Take one down (it goes back to its owner, unpublished) or dismiss the report. */
+/** Reports grouped by what was reported. Take the circuit or discussion down, or dismiss reports one by one. */
 export default function ReportsSection() {
   const dispatch = useDispatch();
-  const [reports, setReports] = useState([]);
+  const reports = useSelector(selectAdminReports);
+  const loaded = useSelector(selectAdminLoaded).reports;
 
-  useEffect(() => {
-    api.adminReports().then(setReports, () => setReports([]));
-  }, []);
-
-  async function dismiss(report) {
-    try {
-      await api.dismissReport(report.id);
-      setReports((list) => list.filter((r) => r.id !== report.id));
-    } catch (err) {
-      dispatch(showToast(err.message));
-    }
+  // Newest report first, so a target sits where its latest report is.
+  const groups = [];
+  for (const r of reports) {
+    const g = groups.find((x) => x.projectId === r.projectId);
+    if (g) g.items.push(r);
+    else groups.push({ projectId: r.projectId, items: [r] });
   }
 
-  function takeDown(report) {
-    const thread = report.projectId.startsWith('thread:');
+  function takeDown(group) {
+    const thread = group.projectId.startsWith('thread:');
     dispatch(
       openModal({
         type: 'confirm',
@@ -36,53 +33,75 @@ export default function ReportsSection() {
           confirmLabel: thread ? 'Delete' : 'Take down',
           onConfirm: async () => {
             const res = thread
-              ? await api.deleteThread(report.projectId.slice(7)).then(
+              ? await api.deleteThread(group.projectId.slice(7)).then(
                   () => ({ ok: true }),
                   () => ({ ok: false }),
                 )
-              : await dispatch(rejectCircuit(report.projectId));
-            // Either way every report about this circuit is handled: if the update was refused, its owner had
+              : await dispatch(rejectCircuit(group.projectId));
+            // Either way every report about it is handled: if the update was refused, its owner had
             // already unpublished or deleted it.
-            await Promise.all(reports.filter((r) => r.projectId === report.projectId).map(dismiss));
-            dispatch(showToast(res.ok || rejectCircuit.fulfilled.match(res) ? 'Taken down.' : 'That was already removed or unshared. Report closed.'));
+            const closed = await dispatch(dismissReport(group.items.map((r) => r.id)));
+            if (closed.payload.length < group.items.length) return; // the thunk already said which part failed
+            dispatch(
+              showToast(
+                res.ok || rejectCircuit.fulfilled.match(res)
+                  ? 'Taken down.'
+                  : 'That was already removed or unshared. Report closed.',
+              ),
+            );
           },
         },
       }),
     );
   }
 
-  return (
-    <>
-      <div className="head" style={{ marginTop: 40 }}>
-        <div>
-          <h1>Reports</h1>
-          <p>Circuits users flagged, newest first.</p>
-        </div>
+  if (!loaded) return <p className="muted">Loading&hellip;</p>;
+  if (groups.length === 0) {
+    return (
+      <div className="empty glass">
+        <h2>No open reports</h2>
+        <p className="muted">Anything users flag will show up here.</p>
       </div>
-      <div className="action-list">
-        {reports.length === 0 && <p className="muted small">No open reports.</p>}
-        {reports.map((r) => (
-          <div key={r.id} className="row" style={{ justifyContent: 'space-between', gap: 12, margin: '6px 0' }}>
-            <span>
-              {r.projectId.startsWith('thread:') ? (
-                <Link to={`/discussions/${r.projectId.slice(7)}`}>Open discussion</Link>
+    );
+  }
+
+  return (
+    <div className="adm-list">
+      {reports.length >= REPORTS_SHOWN && (
+        <p className="muted small">Showing the newest {REPORTS_SHOWN} reports. Clear some to see older ones.</p>
+      )}
+      {groups.map((g) => {
+        const thread = g.projectId.startsWith('thread:');
+        return (
+          <div key={g.projectId} className="adm-row glass">
+            <div className="adm-row-head">
+              {thread ? (
+                <Link to={`/discussions/${g.projectId.slice(7)}`}>Open discussion</Link>
               ) : (
-                <Link to={`/community/${r.projectId}`}>Open circuit</Link>
+                <Link to={`/community/${g.projectId}`}>Open circuit</Link>
               )}
-              <br />
-              <span className="muted small">{r.reason}</span>
-            </span>
-            <span className="row" style={{ gap: 8 }}>
-              <button className="btn" onClick={() => dismiss(r)}>
-                Dismiss
-              </button>
-              <button className="btn danger" onClick={() => takeDown(r)}>
+              <span className="badge">
+                {g.items.length} {g.items.length === 1 ? 'report' : 'reports'}
+              </span>
+              <button className="btn danger" onClick={() => takeDown(g)}>
                 Take down
               </button>
-            </span>
+            </div>
+            <ul className="adm-reasons">
+              {g.items.map((r) => (
+                <li key={r.id}>
+                  <span>
+                    {r.reason} <span className="muted small">· {timeAgo(r.createdAt)}</span>
+                  </span>
+                  <button className="btn small" onClick={() => dispatch(dismissReport([r.id]))}>
+                    Dismiss
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
-        ))}
-      </div>
-    </>
+        );
+      })}
+    </div>
   );
 }

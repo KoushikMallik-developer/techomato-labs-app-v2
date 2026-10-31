@@ -1539,3 +1539,250 @@
 .post-replies {
   margin-left: 24px;
 }
+
+/* admin panel */
+.adm {
+  display: grid;
+  grid-template-columns: 230px 1fr;
+  min-height: 100vh;
+}
+.adm-side {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 22px 16px;
+  border-right: 1px solid var(--edge);
+  background: var(--glass-strong);
+}
+.adm-side .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+}
+.adm-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  margin-top: 14px;
+}
+.adm-nav button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.adm-nav button:hover {
+  background: var(--accent-soft);
+}
+.adm-nav button.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.adm-count {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+}
+.adm-out {
+  margin-top: auto;
+}
+.adm-main {
+  padding: 28px 32px 60px;
+  min-width: 0;
+  max-width: 1100px;
+}
+.adm-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.adm-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 18px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-lg);
+  background: var(--glass-strong);
+}
+.adm-stat:hover {
+  border-color: var(--edge-hi);
+}
+.adm-stat b {
+  font-family: var(--display);
+  font-size: 34px;
+  line-height: 1;
+}
+.adm-stat span {
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.adm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.adm-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-md);
+  background: var(--glass-strong);
+}
+.adm-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.adm-row-head .btn {
+  margin-left: auto;
+}
+.adm-reasons {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.adm-reasons li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--panel-line);
+  padding-top: 6px;
+}
+.adm-user {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+}
+.adm-user-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.adm-avatar {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 800;
+}
+.badge.off {
+  margin-left: 8px;
+  color: var(--stop);
+  background: color-mix(in srgb, var(--stop) 12%, transparent);
+}
+@media (max-width: 800px) {
+  .adm {
+    grid-template-columns: 1fr;
+  }
+  .adm-side {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 12px 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--edge);
+  }
+  .adm-nav {
+    order: 5;
+    flex-direction: row;
+    margin-top: 0;
+    overflow-x: auto;
+  }
+  .adm-nav button {
+    white-space: nowrap;
+  }
+  .adm-out {
+    margin: 0 0 0 auto;
+  }
+  .adm-main {
+    padding: 20px 16px 60px;
+  }
+  .adm-user {
+    flex-wrap: wrap;
+  }
+}
+.adm-activity {
+  margin-top: 26px;
+}
+.adm-activity-head {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.adm-activity-head h2 {
+  font-size: 22px;
+}
+.adm-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.adm-chart {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-md);
+  background: var(--glass-strong);
+}
+.adm-chart figcaption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.adm-chart figcaption b {
+  font-family: var(--display);
+  font-size: 26px;
+}
+.adm-chart svg {
+  display: block;
+  width: 100%;
+  height: 90px;
+  margin-top: 8px;
+}
+.adm-chart rect {
+  fill: var(--accent);
+}
+.adm-chart rect:hover {
+  opacity: 0.7;
+}
+.adm-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}

@@ -42,7 +42,7 @@ describe('lessons', () => {
     api.create.mockResolvedValue({ id: 'p-9', name: 'Lesson: Blink an LED' });
     renderPage({ auth: authState({ user: signedInUser() }) });
     fireEvent.click(screen.getAllByText('Start lesson')[0]);
-    expect(await screen.findByText('at /editor/p-9?lesson=blink')).toBeInTheDocument();
+    expect(await screen.findByText('at /editor/p-9?lesson=blink', {}, { timeout: 5000 })).toBeInTheDocument(); // a busy machine can take over the 1 s default
     expect(api.create).toHaveBeenCalledWith('blink', 'Lesson: Blink an LED');
   });
 

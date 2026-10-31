@@ -1,209 +1,146 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import CircuitThumbnail from '@/components/CircuitThumbnail';
 import BrandMark from '@/components/BrandMark';
-import { openModal } from '@/features/ui/uiSlice';
+import { REPORTS_SHOWN } from '@/lib/limits';
+import PendingSection from '../components/PendingSection';
 import ReportsSection from '../components/ReportsSection';
+import ActivitySection from '../components/ActivitySection';
+import UsersSection from '../components/UsersSection';
+import { timeAgo } from '../timeAgo';
 import {
   fetchPending,
-  fetchUsers,
-  approveCircuit,
-  rejectCircuit,
-  setUserDisabled,
+  fetchReports,
   adminLogout,
   selectPendingCircuits,
-  selectAdminUsers,
-  selectUsersCursor,
+  selectAdminReports,
+  selectAdminLoaded,
 } from '../adminSlice';
 
-function timeAgo(ts) {
-  const s = Math.max(1, Math.floor((Date.now() - ts) / 1000));
-  const units = [
-    ['year', 31536000],
-    ['month', 2592000],
-    ['day', 86400],
-    ['hour', 3600],
-    ['minute', 60],
-  ];
-  for (const [name, secs] of units) {
-    const v = Math.floor(s / secs);
-    if (v >= 1) return `${v} ${name}${v > 1 ? 's' : ''} ago`;
-  }
-  return 'just now';
+const TABS = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    title: 'Overview',
+    sub: 'What needs your attention right now.',
+  },
+  {
+    id: 'review',
+    label: 'Review queue',
+    title: 'Review queue',
+    sub: 'Circuits submitted to Community Circuits, waiting for a decision.',
+  },
+  {
+    id: 'reports',
+    label: 'Reports',
+    title: 'Reports',
+    sub: 'Circuits and discussions users flagged, grouped by target.',
+  },
+  {
+    id: 'users',
+    label: 'Users',
+    title: 'Users',
+    sub: 'Newest first. A disabled account can browse but cannot write anything.',
+  },
+];
+
+function Overview({ pending, reports, loaded, go }) {
+  const oldest = pending.at(-1); // the queue is newest first
+  const latest = reports[0];
+  const num = (n, ready) => (ready ? n : '–');
+  return (
+    <>
+      <div className="adm-stats">
+        <button className="adm-stat glass" onClick={() => go('review')}>
+          <b>{num(pending.length, loaded.pending)}</b>
+          <span>awaiting review</span>
+        </button>
+        <button className="adm-stat glass" onClick={() => go('reports')}>
+          <b>{num(reports.length, loaded.reports)}</b>
+          <span>open reports</span>
+        </button>
+      </div>
+      <div className="adm-list">
+        <div className="adm-row glass">
+          <b>Oldest submission</b>
+          <span className="muted small">
+            {oldest
+              ? `${oldest.name} by @${oldest.author}, ${timeAgo(oldest.publishedAt || oldest.updatedAt)}`
+              : loaded.pending
+                ? 'Nothing waiting.'
+                : '–'}
+          </span>
+        </div>
+        <div className="adm-row glass">
+          <b>Latest report</b>
+          <span className="muted small">
+            {latest
+              ? `${latest.reason} (${timeAgo(latest.createdAt)})`
+              : loaded.reports
+                ? 'No open reports.'
+                : '–'}
+          </span>
+        </div>
+      </div>
+      <ActivitySection />
+    </>
+  );
 }
 
 export default function AdminPanelPage() {
   const dispatch = useDispatch();
+  const [params, setParams] = useSearchParams();
   const pending = useSelector(selectPendingCircuits);
-  const users = useSelector(selectAdminUsers);
-  const usersCursor = useSelector(selectUsersCursor);
-  const [search, setSearch] = useState('');
+  const reports = useSelector(selectAdminReports);
+  const loaded = useSelector(selectAdminLoaded);
+  const tab = TABS.find((t) => t.id === params.get('tab')) || TABS[0];
+  const go = (id) => setParams(id === 'overview' ? {} : { tab: id });
+  const counts = { review: pending.length, reports: reports.length };
 
   useEffect(() => {
     dispatch(fetchPending());
-    dispatch(fetchUsers());
+    dispatch(fetchReports());
   }, [dispatch]);
 
-  function onSearch(e) {
-    e.preventDefault();
-    dispatch(fetchUsers({ q: search.trim() }));
-  }
-
-  function onToggleUser(user) {
-    if (user.disabled) return dispatch(setUserDisabled({ id: user.id, disabled: false }));
-    dispatch(
-      openModal({
-        type: 'confirm',
-        props: {
-          title: `Disable @${user.handle}?`,
-          body: 'They can still look around, but cannot comment, like, create, edit or share circuits until you enable the account again. Circuits that are already public stay up.',
-          confirmLabel: 'Disable account',
-          onConfirm: () => dispatch(setUserDisabled({ id: user.id, disabled: true })),
-        },
-      }),
-    );
-  }
-
   return (
-    <div className="page">
-      <header className="nav">
-        <div className="container nav-in">
-          <Link to="/" className="brand">
-            <BrandMark />
-            <b>Techomato Labs</b>
-            <span className="badge" style={{ marginLeft: 4 }}>
-              Admin
-            </span>
-          </Link>
-          <div className="nav-right">
-            <button className="btn" onClick={() => dispatch(adminLogout())}>
-              Log out
+    <div className="adm">
+      <aside className="adm-side">
+        <Link to="/" className="brand">
+          <BrandMark />
+          <b>Techomato Labs</b>
+        </Link>
+        <span className="badge">Admin</span>
+        <nav className="adm-nav" aria-label="Admin sections">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              className={tab.id === t.id ? 'on' : ''}
+              aria-current={tab.id === t.id ? 'page' : undefined}
+              onClick={() => go(t.id)}
+            >
+              {t.label}
+              {counts[t.id] > 0 && <span className="adm-count">{counts[t.id]}{t.id === 'reports' && counts.reports >= REPORTS_SHOWN ? '+' : ''}</span>}
             </button>
-          </div>
-        </div>
-      </header>
-      <div className="container wrap">
+          ))}
+        </nav>
+        <button className="btn adm-out" onClick={() => dispatch(adminLogout())}>
+          Log out
+        </button>
+      </aside>
+      <main className="adm-main">
         <div className="head">
           <div>
-            <h1>Pending approval</h1>
-            <p>Circuits submitted to Community Circuits, waiting for review.</p>
+            <h1>{tab.title}</h1>
+            <p>{tab.sub}</p>
           </div>
         </div>
-
-        {pending.length === 0 ? (
-          <div className="empty glass">
-            <h2>Nothing to review</h2>
-            <p className="muted">New submissions will show up here.</p>
-          </div>
-        ) : (
-          <div className="cards">
-            {pending.map((item) => (
-              <div className="pcard glass" key={item.id}>
-                <div className="thumb">
-                  <CircuitThumbnail parts={item.parts} wires={item.wires} />
-                </div>
-                <div className="pcard-body">
-                  <span className="pname">{item.name}</span>
-                  <span className="small muted">
-                    by @{item.author} · submitted {timeAgo(item.publishedAt || item.updatedAt)}
-                  </span>
-                  {item.description && <p className="small muted">{item.description}</p>}
-                  {item.tags?.length > 0 && (
-                    <div className="tags">
-                      {item.tags.map((t) => (
-                        <span className="tag" key={t}>
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="pcard-foot" style={{ gap: 8 }}>
-                  <button className="btn danger" onClick={() => dispatch(rejectCircuit(item.id))}>
-                    Reject
-                  </button>
-                  <button
-                    className="btn primary"
-                    onClick={() => dispatch(approveCircuit({ id: item.id, seen: item.updatedAt }))}
-                  >
-                    Approve
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+        {tab.id === 'overview' && (
+          <Overview pending={pending} reports={reports} loaded={loaded} go={go} />
         )}
-
-        <ReportsSection />
-
-        <div className="head" style={{ marginTop: 40 }}>
-          <div>
-            <h1>Users</h1>
-            <p>Newest first. A disabled account can browse but cannot write anything.</p>
-          </div>
-        </div>
-        <form className="row" onSubmit={onSearch} style={{ marginBottom: 12 }}>
-          <input
-            className="input"
-            placeholder="Search by name, email or handle…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ maxWidth: 360 }}
-          />
-          <button className="btn" type="submit">
-            Search
-          </button>
-        </form>
-        <div className="action-list">
-          {users.length === 0 && <p className="muted small">No users to show.</p>}
-          {users.map((u) => (
-            <div
-              key={u.id}
-              className="row"
-              style={{ justifyContent: 'space-between', gap: 12, margin: '6px 0' }}
-            >
-              <span>
-                {u.name} <span className="muted small">@{u.handle}</span>
-                {u.disabled && (
-                  <span className="badge" style={{ marginLeft: 8 }}>
-                    Disabled
-                  </span>
-                )}
-                <br />
-                <span className="muted small">
-                  {u.email || 'no email on file'} · joined{' '}
-                  {u.createdAt ? timeAgo(u.createdAt) : 'a while ago'} · {u.circuits} circuits
-                  ·{' '}
-                </span>
-                {u.community > 0 ? (
-                  <button
-                    className="btn small"
-                    onClick={() =>
-                      dispatch(openModal({ type: 'user-circuits', props: { user: u } }))
-                    }
-                  >
-                    {u.community} in Community
-                  </button>
-                ) : (
-                  <span className="muted small">0 in Community</span>
-                )}
-              </span>
-              <button
-                className={`btn${u.disabled ? '' : ' danger'}`}
-                onClick={() => onToggleUser(u)}
-              >
-                {u.disabled ? 'Enable' : 'Disable'}
-              </button>
-            </div>
-          ))}
-        </div>
-        {usersCursor != null && (
-          <button className="btn" onClick={() => dispatch(fetchUsers({ more: true }))}>
-            Load more
-          </button>
-        )}
-      </div>
+        {tab.id === 'review' && <PendingSection />}
+        {tab.id === 'reports' && <ReportsSection />}
+        {tab.id === 'users' && <UsersSection />}
+      </main>
     </div>
   );
 }
